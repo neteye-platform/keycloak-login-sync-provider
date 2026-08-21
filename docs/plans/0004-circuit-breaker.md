@@ -1,10 +1,10 @@
-# 40 - circuit breaker - Work Plan
+# 0004 - circuit breaker - Work Plan
 
 ```yaml
-slug: 40-circuit-breaker
-revision: 2
+slug: 0004-circuit-breaker
+revision: 3
 wave: 2
-prerequisites: [30-config-and-payload]
+prerequisites: [0003-config-and-payload]
 parallel_with: []
 owns_files:
   - src/main/java/com/wuerthit/keycloak/authenticators/loginsync/CircuitBreaker.java
@@ -114,7 +114,7 @@ reviewer sees the specification before the implementation.
 
 - [ ] 1. `CircuitState.java` + `Permit.java` + `CircuitBreakerTest.java`: write the failing specification first - expect a red suite failing on assertions, not compilation
 
-  **References:** `N4-LLD-2.pdf` section 3.2; `LoginSyncConstants` from plan 30 for defaults and
+  **References:** `N4-LLD-2.pdf` section 3.2; `LoginSyncConstants` from plan 0003 for defaults and
   `CIRCUIT_OPEN_LOG_MARKER`; decisions B1-B10.
   **Details:** Create `CircuitState` (enum `CLOSED`, `OPEN`, `HALF_OPEN`) plus the immutable state
   snapshot record: state, consecutive-failure count, count-based ring buffer of the last
@@ -155,9 +155,9 @@ reviewer sees the specification before the implementation.
     assertion failures. Assert the failure output contains `AssertionError` or
     `AssertionFailedError` and contains neither `NullPointerException` nor a compilation error - a
     red suite must be red for the intended reason.
-    **QA happy:** the run fails with assertion errors on the transition tests. Evidence: `.omo/evidence/40-breaker-red.log`.
-    **QA failure:** `grep -cE 'NullPointerException|COMPILATION ERROR' .omo/evidence/40-breaker-red.log`
-    returns 0, proving the red is genuine. Evidence: `.omo/evidence/40-breaker-red-reason.log`.
+    **QA happy:** the run fails with assertion errors on the transition tests. Evidence: `docs/evidence/0004-breaker-red.log`.
+    **QA failure:** `grep -cE 'NullPointerException|COMPILATION ERROR' docs/evidence/0004-breaker-red.log`
+    returns 0, proving the red is genuine. Evidence: `docs/evidence/0004-breaker-red-reason.log`.
     **Commit:** `test: specify circuit breaker state machine and concurrency invariants`
 
 - [ ] 2. `CircuitBreaker.java`: implement until the specification passes - expect zero flakes over 20 runs and a faulty fixture that provably fails
@@ -193,18 +193,18 @@ reviewer sees the specification before the implementation.
     todo-1 case passing. `grep -rniE 'fail.?closed|fail.?open' src/main/java` yields matches only
     inside comments, never identifiers. `grep -c 'currentTimeMillis' CircuitBreaker.java` returns 0.
     `grep -c 'synchronized' CircuitBreaker.java` returns 0. Spotless AOSP passes.
-    **QA happy:** `scripts/test.sh test -Dtest=CircuitBreakerTest` exits 0. Evidence: `.omo/evidence/40-breaker-green.log`.
+    **QA happy:** `scripts/test.sh test -Dtest=CircuitBreakerTest` exits 0. Evidence: `docs/evidence/0004-breaker-green.log`.
     **QA failure:** (a) run the barrier-synchronised 64-thread test 20 consecutive times in a loop;
     all 20 must pass with zero flakes. (b) Point the invariant test at the faulty fixture and assert
     it **fails**, proving the assertion detects a broken CAS; the fixture is committed test code, so
-    no production source is edited and `git status --porcelain` stays clean. Evidence: `.omo/evidence/40-breaker-concurrency.log`.
+    no production source is edited and `git status --porcelain` stays clean. Evidence: `docs/evidence/0004-breaker-concurrency.log`.
     **Commit:** `feat: add thread-safe circuit breaker with generation-bound permits`
 
 ## Final verification wave
 
-- [ ] F1. Concurrency and settlement audit (executable). Run `scripts/test.sh test -Dtest=CircuitBreakerTest` expecting exit 0. Run the 20-iteration loop of the barrier test expecting 20 passes. Run the faulty-fixture invariant test expecting failure. Assert by inspection plus `grep` that: exactly one field of `CircuitBreaker` is an `AtomicReference` and no other mutable field participates in a transition (`grep -cE 'private (volatile |static )?[A-Za-z<>]+ ' CircuitBreaker.java` reviewed against the state record); `grep -c 'nanoTime' CircuitBreaker.java` >= 1 and `currentTimeMillis` == 0; the `ABANDONED` no-sample tests and the stale-generation-discard test are present by name (`grep -c 'abandoned\|staleGeneration' CircuitBreakerTest.java` >= 3). Evidence: `.omo/evidence/40-F1-concurrency.md`.
+- [ ] F1. Concurrency and settlement audit (executable). Run `scripts/test.sh test -Dtest=CircuitBreakerTest` expecting exit 0. Run the 20-iteration loop of the barrier test expecting 20 passes. Run the faulty-fixture invariant test expecting failure. Assert by inspection plus `grep` that: exactly one field of `CircuitBreaker` is an `AtomicReference` and no other mutable field participates in a transition (`grep -cE 'private (volatile |static )?[A-Za-z<>]+ ' CircuitBreaker.java` reviewed against the state record); `grep -c 'nanoTime' CircuitBreaker.java` >= 1 and `currentTimeMillis` == 0; the `ABANDONED` no-sample tests and the stale-generation-discard test are present by name (`grep -c 'abandoned\|staleGeneration' CircuitBreakerTest.java` >= 3). Evidence: `docs/evidence/0004-F1-concurrency.md`.
 
-- [ ] F2. Logging and scope audit (executable). Run `grep -c 'WARN\|warn(' CircuitBreaker.java` and assert exactly one WARN call site, and that `grep -B2 -A2 'warn(' CircuitBreaker.java` shows it on the transition into OPEN carrying `CIRCUIT_OPEN_LOG_MARKER`. Run `grep -c 'never replayed' CircuitBreaker.java` >= 1 and `grep -c 'per-node' CircuitBreaker.java` >= 1, proving the Javadoc statements exist. Run `grep -rc 'resilience4j' src/ pom.xml` expecting 0. Run `grep -cE 'HttpClient|Socket|Files\.' CircuitBreaker.java` expecting 0, proving no I/O. With `BASE_SHA` per P3, `git diff --name-only $BASE_SHA..HEAD` equals this plan's four owned files. Evidence: `.omo/evidence/40-F2-logging.md`.
+- [ ] F2. Logging and scope audit (executable). Run `grep -c 'WARN\|warn(' CircuitBreaker.java` and assert exactly one WARN call site, and that `grep -B2 -A2 'warn(' CircuitBreaker.java` shows it on the transition into OPEN carrying `CIRCUIT_OPEN_LOG_MARKER`. Run `grep -c 'never replayed' CircuitBreaker.java` >= 1 and `grep -c 'per-node' CircuitBreaker.java` >= 1, proving the Javadoc statements exist. Run `grep -rc 'resilience4j' src/ pom.xml` expecting 0. Run `grep -cE 'HttpClient|Socket|Files\.' CircuitBreaker.java` expecting 0, proving no I/O. With `BASE_SHA` per P3, `git diff --name-only $BASE_SHA..HEAD` equals this plan's four owned files. Evidence: `docs/evidence/0004-F2-logging.md`.
 
 ## Commit strategy
 

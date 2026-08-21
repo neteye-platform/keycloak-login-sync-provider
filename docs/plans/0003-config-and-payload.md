@@ -1,10 +1,10 @@
-# 30 - config and payload - Work Plan
+# 0003 - config and payload - Work Plan
 
 ```yaml
-slug: 30-config-and-payload
-revision: 2
+slug: 0003-config-and-payload
+revision: 3
 wave: 1
-prerequisites: [10-contract-reconciliation, 20-scaffold-reconciliation]
+prerequisites: [0001-contract-reconciliation, 0002-scaffold-reconciliation]
 parallel_with: []
 owns_files:
   - src/main/java/com/wuerthit/keycloak/authenticators/loginsync/LoginSyncConstants.java
@@ -57,7 +57,7 @@ becomes `eventType`/`clientId`.
 - MUST NOT add an external JSON library.
 - MUST NOT leave the default record `toString()` on `LoginSyncConfig` or `SyncPayload`.
 - MUST NOT hardcode `/api/sync-user` outside the single constant.
-- MUST NOT modify `pom.xml`, `README.md`, `.gitignore` or any workflow.
+- MUST NOT modify `pom.xml`, `docs/plans/README.md`, `.gitignore`, or any workflow.
 
 ---
 
@@ -104,9 +104,9 @@ Todo 1 lands first; todos 2 and 3 both read its constants.
 
 - [ ] 1. `LoginSyncConstants.java`: the single home for the provisional path and every default - expect `/api/sync-user` to appear exactly once in main
 
-  **References:** `docs/SYNC-CONTRACT.md` (created by plan 10, a hard prerequisite) for the
+  **References:** `docs/SYNC-CONTRACT.md` (created by plan 0001, a hard prerequisite) for the
   provisional-path rationale; `N4-LLD-2.pdf` sections 3.2 and 4.3.1 for defaults;
-  `.omo/evidence/spike-02-config-scope.log` for the pinned spelling.
+  the user-confirmed spelling recorded by plan 0001.
   **Details:** A `final` class with a private constructor. It holds:
   - `PROVIDER_ID = "login-sync"`.
   - `SYNC_USER_PATH = "/api/sync-user"`, commented as a **provisional contract** per LLD Open
@@ -117,12 +117,12 @@ Todo 1 lands first; todos 2 and 3 both read its constants.
   - Defaults: `DEFAULT_HTTP_TIMEOUT_MS = 5000`, `DEFAULT_CB_FAILURE_THRESHOLD = 5`,
     `DEFAULT_CB_ERROR_RATE_THRESHOLD = 50`, `DEFAULT_CB_WINDOW_SIZE = 20`,
     `DEFAULT_CB_COOLDOWN_SECONDS = 30`.
-  - `DEFAULT_MAX_CONCURRENT_SYNCS = 32` (plan 50's bulkhead), commented as deliberately not
+  - `DEFAULT_MAX_CONCURRENT_SYNCS = 32` (plan 0005's bulkhead), commented as deliberately not
     operator-facing (C5).
-  - `DEFAULT_TOKEN_TIMEOUT_MS = 5000` and `DEFAULT_CONNECT_TIMEOUT_MS = 2000` for plan 50's
+  - `DEFAULT_TOKEN_TIMEOUT_MS = 5000` and `DEFAULT_CONNECT_TIMEOUT_MS = 2000` for plan 0005's
     bounded token fetch - review found the token call had no specified timeout at all.
   - `EVENT_TYPE_LOGIN = "LOGIN"` - the only event type emitted.
-  - `CIRCUIT_OPEN_LOG_MARKER = "LOGIN_SYNC_CIRCUIT_OPEN"` for plan 40's WARN.
+  - `CIRCUIT_OPEN_LOG_MARKER = "LOGIN_SYNC_CIRCUIT_OPEN"` for plan 0004's WARN.
     Add a class comment naming the env convention verbatim - `service-endpoint` maps to
     `KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SERVICE_ENDPOINT` - and noting the double underscore is
     empirically required because the single-underscore form does not resolve.
@@ -131,10 +131,10 @@ Todo 1 lands first; todos 2 and 3 both read its constants.
     (exactly one occurrence). `grep -rc 'System.getenv' src/main/java` totals 0.
     `grep -rciE 'REGISTER|UPDATE_PROFILE' src/main/java` totals 0.
     **QA happy:** `scripts/test.sh clean verify` exits 0 and the single-occurrence check exits 0.
-    Evidence: `.omo/evidence/30-constants-verify.log`.
+    Evidence: `docs/evidence/0003-constants-verify.log`.
     **QA failure:** add a second `"/api/sync-user"` literal in a scratch class; the
     single-occurrence check must exit non-zero; delete the scratch class, re-run, confirm exit 0 and
-    a clean `git status --porcelain src/`. Evidence: `.omo/evidence/30-constants-single-point.log`.
+    a clean `git status --porcelain src/`. Evidence: `docs/evidence/0003-constants-single-point.log`.
     **Commit:** `feat: add login sync constants and configuration keys`
 
 - [ ] 2. `LoginSyncConfig.java` + test: the immutable Config.Scope seam - expect defaults applied, zero and negative values rejected, and the secret never rendered
@@ -163,15 +163,15 @@ Todo 1 lands first; todos 2 and 3 both read its constants.
     4-or-more-character substring of it; a fully-populated scope yields every field intact.
     **Acceptance criteria:** `scripts/test.sh test -Dtest=LoginSyncConfigTest` exits 0 with all of
     the above asserted. `grep -c 'System.getenv' src/main/java/**/LoginSyncConfig.java` returns 0.
-    **QA happy:** `scripts/test.sh test -Dtest=LoginSyncConfigTest` exits 0. Evidence: `.omo/evidence/30-config-test.log`.
+    **QA happy:** `scripts/test.sh test -Dtest=LoginSyncConfigTest` exits 0. Evidence: `docs/evidence/0003-config-test.log`.
     **QA failure:** delete the `toString()` override; re-run and confirm the redaction test fails
     with the secret visible in the failure message; restore it, re-run, confirm exit 0 and a clean
-    `git status --porcelain src/`. Evidence: `.omo/evidence/30-config-redaction-fail.log`.
+    `git status --porcelain src/`. Evidence: `docs/evidence/0003-config-redaction-fail.log`.
     **Commit:** `feat: add Config.Scope-backed immutable settings`
 
 - [ ] 3. `SyncPayload.java` + test: the byte-exact wire contract - expect exact JSON, structurally immutable LOGIN, and a redacted `toString()`
 
-  **References:** `N4-LLD-2.pdf` section 4.4; `docs/SYNC-CONTRACT.md` from plan 10; todo 1's
+  **References:** `N4-LLD-2.pdf` section 4.4; `docs/SYNC-CONTRACT.md` from plan 0001; todo 1's
   `EVENT_TYPE_LOGIN`; decisions C6, C8.
   **Details:** A `record` serialised by the `provided` Jackson to exactly six fields in this order:
   `event_type`, `client_id`, `username`, `email`, `groups`, `timestamp`.
@@ -201,17 +201,17 @@ Todo 1 lands first; todos 2 and 3 both read its constants.
     argument, so a non-`LOGIN` payload cannot be constructed.
     **Acceptance criteria:** `scripts/test.sh test -Dtest=SyncPayloadTest` exits 0 with all of the
     above asserted, including exact-JSON equality and the no-public-event-type-parameter assertion.
-    **QA happy:** `scripts/test.sh test -Dtest=SyncPayloadTest` exits 0. Evidence: `.omo/evidence/30-payload-test.log`.
+    **QA happy:** `scripts/test.sh test -Dtest=SyncPayloadTest` exits 0. Evidence: `docs/evidence/0003-payload-test.log`.
     **QA failure:** remove the `@JsonProperty` from the `event_type` component; re-run and confirm
     the exact-JSON test fails showing `eventType` in the actual output; restore it, re-run, confirm
-    exit 0 and a clean `git status --porcelain src/`. Evidence: `.omo/evidence/30-payload-jsonproperty-fail.log`.
+    exit 0 and a clean `git status --porcelain src/`. Evidence: `docs/evidence/0003-payload-jsonproperty-fail.log`.
     **Commit:** `feat: add sync payload with explicit wire contract`
 
 ## Final verification wave
 
-- [ ] F1. Contract audit (executable). Run `scripts/test.sh test -Dtest=SyncPayloadTest,LoginSyncConfigTest` expecting exit 0. Serialise a fixed payload in a test and assert `objectMapper.readTree(json).fieldNames()` equals exactly `[event_type, client_id, username, email, groups, timestamp]` - no extras, none missing. Assert via reflection that `SyncPayload` exposes no public constructor or static factory taking an event-type argument. Assert each default equals the LLD value by `grep -E 'DEFAULT_(HTTP_TIMEOUT_MS|CB_FAILURE_THRESHOLD|CB_ERROR_RATE_THRESHOLD|CB_WINDOW_SIZE|CB_COOLDOWN_SECONDS)' LoginSyncConstants.java` and comparing to `5000, 5, 50, 20, 30`. Evidence: `.omo/evidence/30-F1-contract.md`.
+- [ ] F1. Contract audit (executable). Run `scripts/test.sh test -Dtest=SyncPayloadTest,LoginSyncConfigTest` expecting exit 0. Serialise a fixed payload in a test and assert `objectMapper.readTree(json).fieldNames()` equals exactly `[event_type, client_id, username, email, groups, timestamp]` - no extras, none missing. Assert via reflection that `SyncPayload` exposes no public constructor or static factory taking an event-type argument. Assert each default equals the LLD value by `grep -E 'DEFAULT_(HTTP_TIMEOUT_MS|CB_FAILURE_THRESHOLD|CB_ERROR_RATE_THRESHOLD|CB_WINDOW_SIZE|CB_COOLDOWN_SECONDS)' LoginSyncConstants.java` and comparing to `5000, 5, 50, 20, 30`. Evidence: `docs/evidence/0003-F1-contract.md`.
 
-- [ ] F2. Log-safety and scope audit (executable). Run `grep -rc 'System.getenv' src/main/java` expecting total 0. Run `grep -rciE 'retry|backoff|REGISTER|UPDATE_PROFILE|resilience4j' src/main/java` expecting total 0. Run the exactly-one `/api/sync-user` check from todo 1 expecting exit 0. Run a test that builds a config and a payload populated with sentinel values `SECRET_SENTINEL`, `email@sentinel.test` and `/GROUP_SENTINEL`, calls `toString()` on both, and asserts none of the three sentinels appears; then assert `grep -rc 'SECRET_SENTINEL' target/surefire-reports/` returns 0. With `BASE_SHA` per P3, run `git diff --name-only $BASE_SHA..HEAD` and assert the set equals this plan's five owned files. Evidence: `.omo/evidence/30-F2-logsafety.md`.
+- [ ] F2. Log-safety and scope audit (executable). Run `grep -rc 'System.getenv' src/main/java` expecting total 0. Run `grep -rciE 'retry|backoff|REGISTER|UPDATE_PROFILE|resilience4j' src/main/java` expecting total 0. Run the exactly-one `/api/sync-user` check from todo 1 expecting exit 0. Run a test that builds a config and a payload populated with sentinel values `SECRET_SENTINEL`, `email@sentinel.test` and `/GROUP_SENTINEL`, calls `toString()` on both, and asserts none of the three sentinels appears; then assert `grep -rc 'SECRET_SENTINEL' target/surefire-reports/` returns 0. With `BASE_SHA` per P3, run `git diff --name-only $BASE_SHA..HEAD` and assert the set equals this plan's five owned files. Evidence: `docs/evidence/0003-F2-logsafety.md`.
 
 ## Commit strategy
 

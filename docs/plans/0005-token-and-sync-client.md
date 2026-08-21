@@ -1,10 +1,10 @@
-# 50 - token provider and sync client - Work Plan
+# 0005 - token provider and sync client - Work Plan
 
 ```yaml
-slug: 50-token-and-sync-client
-revision: 2
+slug: 0005-token-and-sync-client
+revision: 3
 wave: 3
-prerequisites: [10-contract-reconciliation, 30-config-and-payload, 40-circuit-breaker]
+prerequisites: [0001-contract-reconciliation, 0003-config-and-payload, 0004-circuit-breaker]
 parallel_with: []
 owns_files:
   - src/main/java/com/wuerthit/keycloak/authenticators/loginsync/ServiceAccountTokenProvider.java
@@ -87,7 +87,7 @@ bounded.
 | **T10** | **The token fetch happens OUTSIDE the sync bulkhead, with its own bounded connect and request timeouts**                                            | **review: revision 1 left it unbounded (a hang risk on a blocking login path) and inside the bulkhead (a slow Keycloak consumes the receiver's concurrency budget)** |
 | **T11** | **`TOKEN_UNAVAILABLE` settles the breaker permit as `ABANDONED`, not `FAILURE`**                                                                    | **review: attributing Keycloak's own outage to the receiver's breaker opens a circuit that misdescribes reality**                                                    |
 | **T12** | **A failed single-flight future must be evicted, never cached**                                                                                     | **a memoised failed future would make every subsequent login fail permanently**                                                                                      |
-| **T13** | **Explicit ordering: breaker permit -> bounded token fetch (outside bulkhead) -> bulkhead `tryAcquire` -> sync POST -> settle permit in `finally`** | **removes the last ordering ambiguity between plans 40, 50 and 60**                                                                                                  |
+| **T13** | **Explicit ordering: breaker permit -> bounded token fetch (outside bulkhead) -> bulkhead `tryAcquire` -> sync POST -> settle permit in `finally`** | **removes the last ordering ambiguity between plans 0004, 0005 and 0006**                                                                                            |
 
 ---
 
@@ -96,7 +96,7 @@ bounded.
 **TDD for `ServiceAccountTokenProvider`**; tests-after for `SyncClient`.
 
 Unit tests run against a local in-JVM `com.sun.net.httpserver.HttpServer`. This is permitted:
-the LLD restricts _end-to-end_ token issuance to the real Keycloak container, which plan 70
+the LLD restricts _end-to-end_ token issuance to the real Keycloak container, which plan 0007
 honours. Unit tests may stub the token endpoint locally.
 
 The single most important assertion is a **request counter equal to 1** - it is what proves the
@@ -124,12 +124,12 @@ Strictly sequential.
 
 - [ ] 1. `SyncOutcome.java` + `SyncFailedException.java`: the single failure surface - expect no retryable/non-retryable split anywhere
 
-  **References:** `docs/DECISIONS.md` rows `R-01` and `R-02` (plan 10 is a hard prerequisite);
+  **References:** `docs/DECISIONS.md` rows `R-01` and `R-02` (plan 0001 is a hard prerequisite);
   `N4-LLD-2.pdf` sections 3.7 and 4.4.
   **Details:** `SyncOutcome` is an enum with exactly these nine constants: `SUCCESS` (200/201),
   `REJECTED` (4xx other than 401/403), `UNAUTHORIZED` (401/403), `SERVER_ERROR` (5xx), `TIMEOUT`,
   `TRANSPORT_ERROR` (IO), `TOKEN_UNAVAILABLE`, `SKIPPED_CIRCUIT_OPEN`, `SKIPPED_SATURATED`.
-  Each constant MUST carry two boolean properties used by plan 60 so the mapping is data, not
+  Each constant MUST carry two boolean properties used by plan 0006 so the mapping is data, not
   scattered `switch` logic: `blocksLogin()` and `breakerOutcome()` returning the plan-40
   settlement (`SUCCESS`, `FAILURE` or `ABANDONED`). Required values:
   `SUCCESS` -> blocks=false, breaker=SUCCESS. `REJECTED`, `SERVER_ERROR`, `TIMEOUT`,
@@ -143,16 +143,16 @@ Strictly sequential.
   totals 0. A unit test asserts `SyncOutcome.values().length == 9` and asserts the exact
   `blocksLogin()`/`breakerOutcome()` pair for **every** constant, so no outcome is left unmapped.
   `scripts/test.sh clean verify` exits 0.
-  **QA happy:** `scripts/test.sh clean verify` exits 0 and the retryable grep totals 0. Evidence: `.omo/evidence/50-outcome-verify.log`.
+  **QA happy:** `scripts/test.sh clean verify` exits 0 and the retryable grep totals 0. Evidence: `docs/evidence/0005-outcome-verify.log`.
   **QA failure:** add a tenth enum constant without updating the test; the
   `values().length == 9` and per-constant mapping assertions must fail, proving no outcome can be
   added without an explicit mapping decision; remove it, re-run, confirm exit 0 and clean
-  `git status --porcelain src/`. Evidence: `.omo/evidence/50-outcome-exhaustive.log`.
+  `git status --porcelain src/`. Evidence: `docs/evidence/0005-outcome-exhaustive.log`.
   **Commit:** `feat: add exhaustive sync outcome taxonomy and failure type`
 
 - [ ] 2. `ServiceAccountTokenProvider.java` + `TokenHandle.java` + test: generation-guarded cached token - expect one token request under 32 concurrent callers and no stale eviction
 
-  **References:** `N4-LLD-2.pdf` sections 3.3 and 3.7; `LoginSyncConfig` from plan 30 for
+  **References:** `N4-LLD-2.pdf` sections 3.3 and 3.7; `LoginSyncConfig` from plan 0003 for
   `sa-client-id`, `sa-client-secret`, `sa-token-endpoint`, `DEFAULT_TOKEN_TIMEOUT_MS` and
   `DEFAULT_CONNECT_TIMEOUT_MS`; decisions T3, T4, T5, T8, T9, T10, T12.
   **Details:** TDD. POST `grant_type=client_credentials` as
@@ -186,11 +186,11 @@ Strictly sequential.
     message or `toString()` contains the token or secret.
     **Acceptance criteria:** `scripts/test.sh test -Dtest=ServiceAccountTokenProviderTest` exits 0
     with all of the above, including the G1/G2 interleaving assertion.
-    **QA happy:** the suite exits 0. Evidence: `.omo/evidence/50-token-test.log`.
+    **QA happy:** the suite exits 0. Evidence: `docs/evidence/0005-token-test.log`.
     **QA failure:** replace `invalidateIfCurrent` with an unconditional clear in a committed faulty
     test fixture; the G1/G2 interleaving test must fail showing G2 evicted; point the test back at
     the real implementation and confirm it passes. No production source is edited, so
-    `git status --porcelain` stays clean. Evidence: `.omo/evidence/50-token-invalidation-race.log`.
+    `git status --porcelain` stays clean. Evidence: `docs/evidence/0005-token-invalidation-race.log`.
     **Commit:** `feat: add generation-guarded cached service-account token provider`
 
 - [ ] 3. `SyncClient.java` + test: one-attempt POST with bulkhead - expect exactly one HTTP attempt for every failure mode
@@ -202,7 +202,7 @@ Strictly sequential.
   - **Ordering (T13).** `send(payload)` performs, in this exact order: acquire the token via
     `tokenProvider.acquire()` **before** touching the semaphore (T10); then
     `semaphore.tryAcquire()` with **zero timeout**; then the POST; releasing the semaphore in a
-    `finally`. The breaker permit is acquired and settled by plan 60 around this whole call.
+    `finally`. The breaker permit is acquired and settled by plan 0006 around this whole call.
   - **200 and 201 are success.** Everything else - 4xx, 5xx, timeout, IO - is a single-attempt
     failure. **No retry, no backoff, ever.**
   - **401/403 (T2):** map to `UNAUTHORIZED`, call `tokenProvider.invalidateIfCurrent(handle)` with
@@ -228,17 +228,17 @@ Strictly sequential.
     **Acceptance criteria:** `scripts/test.sh test -Dtest=SyncClientTest` exits 0 with the stub's
     request counter asserted **exactly 1** in each of the 400/401/403/500/timeout cases and
     **exactly 0** in the saturated case.
-    **QA happy:** the suite exits 0. Evidence: `.omo/evidence/50-syncclient-test.log`.
+    **QA happy:** the suite exits 0. Evidence: `docs/evidence/0005-syncclient-test.log`.
     **QA failure:** in a committed faulty test fixture, wrap the POST in a one-retry loop; the 500
     test must fail reporting a request count of 2; point back at the real implementation and confirm
-    the count is 1. This is the assertion that proves the LLD's no-retry rule is enforced. Evidence: `.omo/evidence/50-syncclient-noretry.log`.
+    the count is 1. This is the assertion that proves the LLD's no-retry rule is enforced. Evidence: `docs/evidence/0005-syncclient-noretry.log`.
     **Commit:** `feat: add one-attempt sync client with bulkhead`
 
 ## Final verification wave
 
-- [ ] F1. No-retry and ordering audit (executable). Run `scripts/test.sh test -Dtest=SyncClientTest,ServiceAccountTokenProviderTest` expecting exit 0. Assert the per-case request counters (1 for 400/401/403/500/timeout, 0 for saturated) appear as explicit assertions: `grep -cE 'assert.*[Rr]equestCount.*1' SyncClientTest.java` >= 5. Run `grep -rniE '\bretry\b|backoff|exponential' src/main/java` and assert every hit is a comment describing retry as removed. Run `grep -c 'invalidateIfCurrent' SyncClient.java` >= 1 and `grep -c 'invalidate()' src/main/java -r` == 0, proving the unguarded form does not exist. Assert the ordering test name is present: `grep -c 'tokenFetchedBeforeSemaphore\|beforeBulkhead' SyncClientTest.java` >= 1. Evidence: `.omo/evidence/50-F1-noretry.md`.
+- [ ] F1. No-retry and ordering audit (executable). Run `scripts/test.sh test -Dtest=SyncClientTest,ServiceAccountTokenProviderTest` expecting exit 0. Assert the per-case request counters (1 for 400/401/403/500/timeout, 0 for saturated) appear as explicit assertions: `grep -cE 'assert.*[Rr]equestCount.*1' SyncClientTest.java` >= 5. Run `grep -rniE '\bretry\b|backoff|exponential' src/main/java` and assert every hit is a comment describing retry as removed. Run `grep -c 'invalidateIfCurrent' SyncClient.java` >= 1 and `grep -c 'invalidate()' src/main/java -r` == 0, proving the unguarded form does not exist. Assert the ordering test name is present: `grep -c 'tokenFetchedBeforeSemaphore\|beforeBulkhead' SyncClientTest.java` >= 1. Evidence: `docs/evidence/0005-F1-noretry.md`.
 
-- [ ] F2. Secret-safety, bounds and dependency audit (executable). Run a test populating the stub with sentinels `TOKEN_SENTINEL` and `SECRET_SENTINEL`, force each failure mode, then assert `grep -rc 'TOKEN_SENTINEL\|SECRET_SENTINEL' target/surefire-reports/` returns 0 - proving a failing test cannot print a token. Run `grep -c 'DEFAULT_TOKEN_TIMEOUT_MS\|DEFAULT_CONNECT_TIMEOUT_MS' ServiceAccountTokenProvider.java` >= 2, proving the token call is bounded. Run `scripts/test.sh -q dependency:tree` and assert no `okhttp`, `httpclient`, `resteasy-client` or `resilience4j` appears and no `compile`-scope third-party dependency exists. With `BASE_SHA` per P3, `git diff --name-only $BASE_SHA..HEAD` equals this plan's seven owned files. Evidence: `.omo/evidence/50-F2-secrets.md`.
+- [ ] F2. Secret-safety, bounds and dependency audit (executable). Run a test populating the stub with sentinels `TOKEN_SENTINEL` and `SECRET_SENTINEL`, force each failure mode, then assert `grep -rc 'TOKEN_SENTINEL\|SECRET_SENTINEL' target/surefire-reports/` returns 0 - proving a failing test cannot print a token. Run `grep -c 'DEFAULT_TOKEN_TIMEOUT_MS\|DEFAULT_CONNECT_TIMEOUT_MS' ServiceAccountTokenProvider.java` >= 2, proving the token call is bounded. Run `scripts/test.sh -q dependency:tree` and assert no `okhttp`, `httpclient`, `resteasy-client` or `resilience4j` appears and no `compile`-scope third-party dependency exists. With `BASE_SHA` per P3, `git diff --name-only $BASE_SHA..HEAD` equals this plan's seven owned files. Evidence: `docs/evidence/0005-F2-secrets.md`.
 
 ## Commit strategy
 

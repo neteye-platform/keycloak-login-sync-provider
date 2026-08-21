@@ -1,10 +1,10 @@
-# 60 - authenticator SPI - Work Plan
+# 0006 - authenticator SPI - Work Plan
 
 ```yaml
-slug: 60-authenticator-spi
-revision: 2
+slug: 0006-authenticator-spi
+revision: 3
 wave: 4
-prerequisites: [30-config-and-payload, 40-circuit-breaker, 50-token-and-sync-client]
+prerequisites: [0003-config-and-payload, 0004-circuit-breaker, 0005-token-and-sync-client]
 parallel_with: []
 owns_files:
   - src/main/java/com/wuerthit/keycloak/authenticators/loginsync/LoginSyncAuthenticator.java
@@ -67,7 +67,7 @@ A1-A11 with the failure each prevents.
 - MUST NOT perform the HTTP call while holding a lock, nor settle more than one breaker outcome
   per login.
 - MUST NOT log the token, payload body, email or group paths.
-- MUST NOT modify `pom.xml`, `README.md` or any workflow.
+- MUST NOT modify `pom.xml`, `docs/plans/README.md`, or any workflow.
 
 ---
 
@@ -124,8 +124,8 @@ Per invariant P1 every check names a command; per P3 record `BASE_SHA`.
 - [ ] 1. `LoginSyncAuthenticatorFactory.java` + `META-INF/services` + `messages_en.properties`: register the provider - expect `login-sync` present in the built jar
 
   **References:** `org.keycloak.authentication.AuthenticatorFactory`; `LoginSyncConstants.PROVIDER_ID`
-  and `LoginSyncConfig` from plan 30; `CircuitBreaker` from plan 40;
-  `ServiceAccountTokenProvider`/`SyncClient` from plan 50; decisions A4, A5, A7, A11.
+  and `LoginSyncConfig` from plan 0003; `CircuitBreaker` from plan 0004;
+  `ServiceAccountTokenProvider`/`SyncClient` from plan 0005; decisions A4, A5, A7, A11.
   **Details:**
   - `getId()` returns `LoginSyncConstants.PROVIDER_ID`.
   - `init(Config.Scope)` builds `LoginSyncConfig.from(config)`. If not `configured()`, record that
@@ -152,17 +152,17 @@ Per invariant P1 every check names a command; per P3 record `BASE_SHA`.
     returns 1. A unit test asserts `getConfigProperties()` is non-null and empty and that
     `getRequirementChoices()` contains exactly REQUIRED and DISABLED. A unit test asserts that with
     an unconfigured `Config.Scope`, `init()` does not throw and no `SyncClient` is constructed.
-    **QA happy:** both `unzip` commands print the expected contents. Evidence: `.omo/evidence/60-jar-contents.log`.
+    **QA happy:** both `unzip` commands print the expected contents. Evidence: `docs/evidence/0006-jar-contents.log`.
     **QA failure:** rename the services file, rebuild, and confirm the `unzip -p` assertion fails
     because the entry is absent; restore it, rebuild, confirm it passes and `git status --porcelain`
-    is clean. Evidence: `.omo/evidence/60-jar-missing-services.log`.
+    is clean. Evidence: `docs/evidence/0006-jar-missing-services.log`.
     **Commit:** `feat: add login sync authenticator factory and SPI registration`
 
 - [ ] 2. `LoginSyncAuthenticator.java`: per-request logic with guaranteed permit settlement - expect every skip to call `success()` and never `attempted()`
 
   **References:** `org.keycloak.authentication.Authenticator`; `AuthenticationFlowContext`;
   `UserModel.getGroupsStream()` with `org.keycloak.models.utils.KeycloakModelUtils.buildGroupPath`;
-  `SyncPayload` from plan 30; `SyncOutcome` from plan 50; decisions A0, A1, A2, A3, A6, A8, A9,
+  `SyncPayload` from plan 0003; `SyncOutcome` from plan 0005; decisions A0, A1, A2, A3, A6, A8, A9,
   A10.
   **The verified constraint that shapes this class:** in Keycloak 26.7.0,
   `AuthenticationProcessor.isSuccessful()` (lines 780-784) returns true only for
@@ -207,9 +207,9 @@ context.form().setError("loginSyncFailed").createErrorPage(Response.Status.INTER
     `grep -rcE 'session\.tokens\(\)|createClientAccessToken' src/main/java` returns 0.
     `grep -c 'finally' LoginSyncAuthenticator.java` >= 1.
     **QA happy:** `scripts/test.sh clean verify` exits 0 and the `attempted()` grep returns 0.
-    Evidence: `.omo/evidence/60-authenticator-verify.log`.
+    Evidence: `docs/evidence/0006-authenticator-verify.log`.
     **QA failure:** `grep -rc 'session.tokens()' src/main/java` returns 0, proving no user-token path
-    exists. Evidence: `.omo/evidence/60-authenticator-notoken.log`.
+    exists. Evidence: `docs/evidence/0006-authenticator-notoken.log`.
     **Commit:** `feat: add login sync authenticator`
 
 - [ ] 3. `LoginSyncAuthenticatorTest.java`: cover every branch - expect each skip to assert `success()`, never `attempted()`, and no sync call
@@ -241,19 +241,19 @@ context.form().setError("loginSyncFailed").createErrorPage(Response.Status.INTER
   - **`action(...)`:** throws `IllegalStateException`.
     **Acceptance criteria:** `scripts/test.sh test -Dtest=LoginSyncAuthenticatorTest` exits 0 with
     all sixteen cases asserted.
-    **QA happy:** the suite exits 0. Evidence: `.omo/evidence/60-authenticator-test.log`.
+    **QA happy:** the suite exits 0. Evidence: `docs/evidence/0006-authenticator-test.log`.
     **QA failure:** in a committed faulty test fixture, replace the flow-path default branch with a
     fall-through to the sync; the unknown-flow-path test must fail; point back at the real
     implementation and confirm it passes. Separately, change one skip branch's fixture to call
     `attempted()` and confirm the `never()).attempted()` assertion fails - proving the regression
-    guard for the revision-1 defect is live. Evidence: `.omo/evidence/60-authenticator-flowpath-fail.log`.
+    guard for the revision-1 defect is live. Evidence: `docs/evidence/0006-authenticator-flowpath-fail.log`.
     **Commit:** `test: cover every authenticator branch`
 
 ## Final verification wave
 
-- [ ] F1. SPI correctness audit (executable). Run `scripts/test.sh clean package` expecting exit 0. Run `unzip -p target/keycloak-login-sync-provider-0.1.0.jar META-INF/services/org.keycloak.authentication.AuthenticatorFactory` expecting exactly the factory FQCN. Run `unzip -l target/... | grep -c messages_en.properties` expecting 1. Run `scripts/test.sh test -Dtest=LoginSyncAuthenticatorTest` expecting exit 0. Run `grep -rc 'attempted()' src/main/java` expecting **0** - the single most important regression check in this plan. Run `grep -c 'Collections.emptyList()' LoginSyncAuthenticatorFactory.java` expecting >= 1. Evidence: `.omo/evidence/60-F1-spi.md`.
+- [ ] F1. SPI correctness audit (executable). Run `scripts/test.sh clean package` expecting exit 0. Run `unzip -p target/keycloak-login-sync-provider-0.1.0.jar META-INF/services/org.keycloak.authentication.AuthenticatorFactory` expecting exactly the factory FQCN. Run `unzip -l target/... | grep -c messages_en.properties` expecting 1. Run `scripts/test.sh test -Dtest=LoginSyncAuthenticatorTest` expecting exit 0. Run `grep -rc 'attempted()' src/main/java` expecting **0** - the single most important regression check in this plan. Run `grep -c 'Collections.emptyList()' LoginSyncAuthenticatorFactory.java` expecting >= 1. Evidence: `docs/evidence/0006-F1-spi.md`.
 
-- [ ] F2. Scope, settlement and safety audit (executable). Run `grep -rcE 'session\.tokens\(\)|createClientAccessToken' src/main/java` expecting 0. Run `grep -rciE 'REGISTER|UPDATE_PROFILE|RequiredActionProvider' src/main/java` expecting 0. Run `grep -c 'synchronized' LoginSyncAuthenticator.java` expecting 0. Assert by named test that `permit.complete(...)` is invoked exactly once on the success, failure, thrown-`SyncFailedException` and thrown-`RuntimeException` paths (`grep -c 'settledExactlyOnce' LoginSyncAuthenticatorTest.java` >= 4). Run a sentinel test populating email `email@sentinel.test` and group `/GROUP_SENTINEL`, force a failure, then assert `grep -rc 'sentinel' target/surefire-reports/ target/*.log 2>/dev/null` returns 0. With `BASE_SHA` per P3, `git diff --name-only $BASE_SHA..HEAD` equals this plan's five owned files. Evidence: `.omo/evidence/60-F2-scope.md`.
+- [ ] F2. Scope, settlement and safety audit (executable). Run `grep -rcE 'session\.tokens\(\)|createClientAccessToken' src/main/java` expecting 0. Run `grep -rciE 'REGISTER|UPDATE_PROFILE|RequiredActionProvider' src/main/java` expecting 0. Run `grep -c 'synchronized' LoginSyncAuthenticator.java` expecting 0. Assert by named test that `permit.complete(...)` is invoked exactly once on the success, failure, thrown-`SyncFailedException` and thrown-`RuntimeException` paths (`grep -c 'settledExactlyOnce' LoginSyncAuthenticatorTest.java` >= 4). Run a sentinel test populating email `email@sentinel.test` and group `/GROUP_SENTINEL`, force a failure, then assert `grep -rc 'sentinel' target/surefire-reports/ target/*.log 2>/dev/null` returns 0. With `BASE_SHA` per P3, `git diff --name-only $BASE_SHA..HEAD` equals this plan's five owned files. Evidence: `docs/evidence/0006-F2-scope.md`.
 
 ## Commit strategy
 

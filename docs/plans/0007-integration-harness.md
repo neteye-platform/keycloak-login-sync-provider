@@ -1,10 +1,10 @@
-# 70 - integration harness - Work Plan
+# 0007 - integration harness - Work Plan
 
 ```yaml
-slug: 70-integration-harness
-revision: 2
+slug: 0007-integration-harness
+revision: 3
 wave: 5
-prerequisites: [60-authenticator-spi]
+prerequisites: [0006-authenticator-spi]
 parallel_with: []
 owns_files:
   - src/test/java/com/wuerthit/keycloak/authenticators/loginsync/support/MockSyncService.java
@@ -30,7 +30,7 @@ all**. Scenarios are now grouped into isolated fixtures with per-group breaker s
 401 proof asserts a second POST with a _different_ token rather than a bare login success.
 
 **Also added:** a production-defaults group (threshold 5, window 20). Revision 1 tested only the
-degenerate window-size-1 configuration, in which plan 40's full-window guard is trivially
+degenerate window-size-1 configuration, in which plan 0004's full-window guard is trivially
 satisfied - so a real bug at the shipped defaults could pass.
 
 **What it will NOT do.** No mock token endpoint. No direct-grant shortcut. No receiver-side
@@ -75,9 +75,9 @@ validation logic. No production code changes.
 | I1     | Plain `GenericContainer`, `Wait.forHttp("/realms/master")` 200, 3-minute startup                                                                                            | the pattern already proven in `../keycloak-oidc-groups-mapper/.../GroupOIDCMapperIT.java`                                          |
 | I2     | Jar path from the `provider.jar` system property                                                                                                                            | already wired into Failsafe by the bootstrap plan                                                                                  |
 | I3     | The fixture creates the confidential client and service account at runtime                                                                                                  | the LLD forbids provisioning scripts in the repo but permits test fixtures                                                         |
-| I4     | One `MockSyncService` with a `main(String[])`                                                                                                                               | plan 80's compose stack runs this same class, so the two cannot drift                                                              |
+| I4     | One `MockSyncService` with a `main(String[])`                                                                                                                               | plan 0008's compose stack runs this same class, so the two cannot drift                                                            |
 | **I5** | **Scenarios are grouped into isolated nested classes, each with its own container or its own realm plus a fresh breaker, and each group declares its own breaker settings** | **review: a single shared singleton breaker made revision 1's scenarios contradict each other**                                    |
-| **I6** | **A production-defaults group (threshold 5, window 20, cooldown 30s) runs alongside the aggressive group**                                                                  | **review: window size 1 makes plan 40's full-window guard trivially true, so the degenerate config alone could mask a real bug**   |
+| **I6** | **A production-defaults group (threshold 5, window 20, cooldown 30s) runs alongside the aggressive group**                                                                  | **review: window size 1 makes plan 0004's full-window guard trivially true, so the degenerate config alone could mask a real bug** |
 | **I7** | **The 401 proof asserts two POSTs carrying two _different_ tokens, not merely a later successful login**                                                                    | **review: an OPEN breaker yields a successful login with zero requests, so login success alone proves nothing about invalidation** |
 | **I8** | **`CapturedRequest.toString()` redacts `Authorization`, and no assertion message embeds a token**                                                                           | **review: a failing assertion would otherwise print a live bearer token into the Surefire report**                                 |
 
@@ -136,15 +136,15 @@ Todos 1 and 2 are independent test-support code; todo 3 consumes both.
     message.
     **It MUST NOT implement a token endpoint** or return anything resembling an `access_token`. Add
     a comment stating tokens come from the real Keycloak container per the LLD.
-    Expose `main(String[])` so plan 80's compose stack runs this identical class (I4).
+    Expose `main(String[])` so plan 0008's compose stack runs this identical class (I4).
     **Acceptance criteria:** a self-test asserts switching to `http500` changes the response code
     from 200 to 500 without a restart; that a recorded request exposes headers and body; that
     `reset()` empties the log; and that `new CapturedRequest(...withAuthHeader("Bearer abc.def.ghi")).toString()`
     contains neither `abc.def.ghi` nor the substring `def`. `grep -cE 'access_token|"/token"' MockSyncService.java`
     returns 0.
-    **QA happy:** the self-test passes. Evidence: `.omo/evidence/70-mock-selftest.log`.
+    **QA happy:** the self-test passes. Evidence: `docs/evidence/0007-mock-selftest.log`.
     **QA failure:** add a scratch token endpoint to the mock; the `access_token` grep assertion must
-    fail; remove it, re-run, confirm 0 and a clean `git status --porcelain src/test`. Evidence: `.omo/evidence/70-mock-notoken.log`.
+    fail; remove it, re-run, confirm 0 and a clean `git status --porcelain src/test`. Evidence: `docs/evidence/0007-mock-notoken.log`.
     **Commit:** `test: add receiver-only mock syncservice with redacted request capture`
 
 - [ ] 2. `KeycloakAdminApi.java` + `BrowserLogin.java`: fixture and login driver - expect a real browser-flow login with distinguishable success and failure
@@ -171,9 +171,9 @@ Todos 1 and 2 are independent test-support code; todo 3 consumes both.
     `createConfidentialClientWithServiceAccount` returns a usable id and secret; `BrowserLogin`
     returns success-with-code for valid credentials and failure-with-body for a blocked login.
     `grep -c 'grant_type=password' BrowserLogin.java` returns 0.
-    **QA happy:** exercised by todo 3; compiles clean under Spotless. Evidence: `.omo/evidence/70-harness-compile.log`.
+    **QA happy:** exercised by todo 3; compiles clean under Spotless. Evidence: `docs/evidence/0007-harness-compile.log`.
     **QA failure:** the `grant_type=password` grep returns 0 for `BrowserLogin`, proving the driver
-    goes through the browser flow. Evidence: `.omo/evidence/70-harness-nodirectgrant.log`.
+    goes through the browser flow. Evidence: `docs/evidence/0007-harness-nodirectgrant.log`.
     **Commit:** `test: add Keycloak admin fixture and browser-flow login driver`
 
 - [ ] 3. `LoginSyncIT.java`: isolated scenario groups with real Keycloak-issued tokens - expect `verify` green twice consecutively
@@ -186,7 +186,7 @@ Todos 1 and 2 are independent test-support code; todo 3 consumes both.
   `/opt/keycloak/providers/`, asserting the file exists first with a message telling the operator
   to run `verify`, not `test`; env `KC_BOOTSTRAP_ADMIN_USERNAME`/`PASSWORD`,
   `KC_HOSTNAME_STRICT=false`, `KC_HTTP_ENABLED=true`; command `start-dev` with **no** `kc.sh build`
-  (measured in `.omo/evidence/spike-02-config-scope.log`); wait on `Wait.forHttp("/realms/master")`
+  (the supported Keycloak development startup mode); wait on `Wait.forHttp("/realms/master")`
   200, 3-minute timeout. Mock exposed via `Testcontainers.exposeHostPorts`, addressed as
   `host.testcontainers.internal`. SPI env vars use the verbatim pinned spelling, e.g.
   `KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SERVICE_ENDPOINT`.
@@ -240,18 +240,18 @@ Todos 1 and 2 are independent test-support code; todo 3 consumes both.
     `GET /realms/master` returns 200 within 2 seconds.
     **Acceptance criteria:** `scripts/test.sh clean verify` exits 0 with every group and every
     cross-cutting assertion passing.
-    **QA happy:** `scripts/test.sh clean verify` exits 0. Evidence: `.omo/evidence/70-it-verify.log`.
+    **QA happy:** `scripts/test.sh clean verify` exits 0. Evidence: `docs/evidence/0007-it-verify.log`.
     **QA failure:** (a) run the full suite twice consecutively; both green, proving isolation is real
     and not order luck. (b) Point the plugin at a fabricated static bearer string via a committed
     faulty fixture; scenario 1's JWKS verification must fail, proving that assertion is not vacuous;
-    restore and confirm green, with `git status --porcelain` clean. Evidence: `.omo/evidence/70-it-rerun.log`.
+    restore and confirm green, with `git status --porcelain` clean. Evidence: `docs/evidence/0007-it-rerun.log`.
     **Commit:** `test: add end-to-end browser-flow integration scenarios`
 
 ## Final verification wave
 
-- [ ] F1. Token-authenticity and flow-authenticity audit (executable). Run `scripts/test.sh clean verify` expecting exit 0. Assert scenario 1's JWKS verification exists and is non-vacuous by running the faulty-fixture variant and expecting failure. Run `grep -cE 'access_token|"/token"' MockSyncService.java` expecting 0. Run `grep -rc 'grant_type=password' src/test/java` expecting 0. Run `grep -c 'T2' LoginSyncIT.java` >= 1 and confirm the group-B assertion compares two distinct tokens. Evidence: `.omo/evidence/70-F1-token-authenticity.md`.
+- [ ] F1. Token-authenticity and flow-authenticity audit (executable). Run `scripts/test.sh clean verify` expecting exit 0. Assert scenario 1's JWKS verification exists and is non-vacuous by running the faulty-fixture variant and expecting failure. Run `grep -cE 'access_token|"/token"' MockSyncService.java` expecting 0. Run `grep -rc 'grant_type=password' src/test/java` expecting 0. Run `grep -c 'T2' LoginSyncIT.java` >= 1 and confirm the group-B assertion compares two distinct tokens. Evidence: `docs/evidence/0007-F1-token-authenticity.md`.
 
-- [ ] F2. Behaviour, isolation and log-safety audit (executable). Assert every admitted failing sync has an explicit exactly-one-request assertion: `grep -cE 'assert.*requests\(\).size\(\).*1|assertEquals\(1, .*requests' LoginSyncIT.java` >= 7 (scenarios 3, 4, 5, 6, 10 and the four group-D logins). Assert the OPEN scenario has an explicit zero-request assertion: `grep -cE 'assertEquals\(0, .*requests' LoginSyncIT.java` >= 1. Run the suite twice consecutively expecting both green. Run the log-safety scan and its matcher non-vacuity check. Run `grep -rc 'Bearer ' target/surefire-reports/ 2>/dev/null` expecting 0, proving no token reached a report. With `BASE_SHA` per P3, `git diff --name-only $BASE_SHA..HEAD` equals this plan's five owned files and includes nothing under `src/main`, `pom.xml` or `.github/`. Evidence: `.omo/evidence/70-F2-behaviour.md`.
+- [ ] F2. Behaviour, isolation and log-safety audit (executable). Assert every admitted failing sync has an explicit exactly-one-request assertion: `grep -cE 'assert.*requests\(\).size\(\).*1|assertEquals\(1, .*requests' LoginSyncIT.java` >= 7 (scenarios 3, 4, 5, 6, 10 and the four group-D logins). Assert the OPEN scenario has an explicit zero-request assertion: `grep -cE 'assertEquals\(0, .*requests' LoginSyncIT.java` >= 1. Run the suite twice consecutively expecting both green. Run the log-safety scan and its matcher non-vacuity check. Run `grep -rc 'Bearer ' target/surefire-reports/ 2>/dev/null` expecting 0, proving no token reached a report. With `BASE_SHA` per P3, `git diff --name-only $BASE_SHA..HEAD` equals this plan's five owned files and includes nothing under `src/main`, `pom.xml` or `.github/`. Evidence: `docs/evidence/0007-F2-behaviour.md`.
 
 ## Commit strategy
 
