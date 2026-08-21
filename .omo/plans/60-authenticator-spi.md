@@ -29,7 +29,7 @@ from Keycloak 26.7.0 source: `AuthenticationProcessor.isSuccessful()` returns tr
 breaks the loop; `authenticateOnly()` line 1132 then throws `AuthenticationFlowException`. **Every
 deliberate skip now calls `context.success()`.**
 
-**Second correction.** `requiresUser() == true` makes Keycloak throw *before* `authenticate()` is
+**Second correction.** `requiresUser() == true` makes Keycloak throw _before_ `authenticate()` is
 invoked when no user is set. Revision 1's null-user guard was therefore dead code sold as a safety
 net for a misplaced execution. The guard is retained only as defence-in-depth and is documented
 honestly: a misplaced execution is **rejected by Keycloak**, not silently skipped.
@@ -73,20 +73,20 @@ A1-A11 with the failure each prevents.
 
 ## Key decisions
 
-| id | decision | failure it prevents |
-|----|----------|---------------------|
-| **A0** | **Every deliberate skip calls `context.success()`, never `context.attempted()`** | **verified from source: ATTEMPTED fails a REQUIRED execution and throws, breaking every login in the realm** |
-| A1 | `requiresUser()` returns `true` | the execution must not run before a user exists |
-| A2 | `configuredFor(...)` returns `true` unconditionally | returning `false` with `isUserSetupAllowed()` false yields a CREDENTIAL_SETUP_REQUIRED failure that kills every login |
-| A3 | `action(...)` throws `IllegalStateException` | this authenticator never issues a challenge; reaching `action` is a logic error |
-| A4 | `getConfigProperties()` returns `Collections.emptyList()`, `isConfigurable()` false | unambiguously safe; per-realm config is out of scope for v1 |
-| A5 | Missing configuration logs one ERROR and calls `context.success()` | `init()` runs even when bound to no flow; throwing would brick unrelated installs, and `attempted()` would break logins |
-| A6 | `getFlowPath()` mapped **exhaustively** with a `success()` skip default | `reset-credentials`, `first-broker-login` and any future path must skip without emitting a wrong `event_type` |
-| A7 | Breaker, token provider and sync client are per-JVM singletons owned by the factory | per-request instances would give every login its own breaker |
-| A8 | Blocking HTTP in `authenticate()` is safe | Keycloak's JAX-RS application is `@Blocking`, so this runs on a worker thread |
-| **A9** | **The permit is settled exactly once in a `finally`, including on `SyncFailedException` and any `RuntimeException`** | **an unsettled trial permit strands the breaker in HALF_OPEN forever, permanently disabling sync** |
+| id      | decision                                                                                                              | failure it prevents                                                                                                                |
+| ------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| **A0**  | **Every deliberate skip calls `context.success()`, never `context.attempted()`**                                      | **verified from source: ATTEMPTED fails a REQUIRED execution and throws, breaking every login in the realm**                       |
+| A1      | `requiresUser()` returns `true`                                                                                       | the execution must not run before a user exists                                                                                    |
+| A2      | `configuredFor(...)` returns `true` unconditionally                                                                   | returning `false` with `isUserSetupAllowed()` false yields a CREDENTIAL_SETUP_REQUIRED failure that kills every login              |
+| A3      | `action(...)` throws `IllegalStateException`                                                                          | this authenticator never issues a challenge; reaching `action` is a logic error                                                    |
+| A4      | `getConfigProperties()` returns `Collections.emptyList()`, `isConfigurable()` false                                   | unambiguously safe; per-realm config is out of scope for v1                                                                        |
+| A5      | Missing configuration logs one ERROR and calls `context.success()`                                                    | `init()` runs even when bound to no flow; throwing would brick unrelated installs, and `attempted()` would break logins            |
+| A6      | `getFlowPath()` mapped **exhaustively** with a `success()` skip default                                               | `reset-credentials`, `first-broker-login` and any future path must skip without emitting a wrong `event_type`                      |
+| A7      | Breaker, token provider and sync client are per-JVM singletons owned by the factory                                   | per-request instances would give every login its own breaker                                                                       |
+| A8      | Blocking HTTP in `authenticate()` is safe                                                                             | Keycloak's JAX-RS application is `@Blocking`, so this runs on a worker thread                                                      |
+| **A9**  | **The permit is settled exactly once in a `finally`, including on `SyncFailedException` and any `RuntimeException`**  | **an unsettled trial permit strands the breaker in HALF_OPEN forever, permanently disabling sync**                                 |
 | **A10** | **The settlement value comes from `SyncOutcome.breakerOutcome()`; the flow outcome from `SyncOutcome.blocksLogin()`** | **review: revision 1 left saturation's breaker attribution undefined, so local load could open the breaker on a healthy receiver** |
-| **A11** | **Transport singletons are not constructed when the config is absent** | **constructing an `HttpClient` against a null endpoint at `postInit` would fail server startup** |
+| **A11** | **Transport singletons are not constructed when the config is absent**                                                | **constructing an `HttpClient` against a null endpoint at `postInit` would fail server startup**                                   |
 
 ---
 
@@ -110,12 +110,12 @@ Per invariant P1 every check names a command; per P3 record `BASE_SHA`.
 
 ## Execution strategy
 
-| wave | todos | depends on |
-|------|-------|-----------|
-| 1 | 1 | - |
-| 2 | 2 | 1 |
-| 3 | 3 | 1, 2 |
-| F | F1, F2 | 1, 2, 3 |
+| wave | todos  | depends on |
+| ---- | ------ | ---------- |
+| 1    | 1      | -          |
+| 2    | 2      | 1          |
+| 3    | 3      | 1, 2       |
+| F    | F1, F2 | 1, 2, 3    |
 
 ---
 
@@ -145,18 +145,18 @@ Per invariant P1 every check names a command; per P3 record `BASE_SHA`.
     contains exactly one line: the factory FQCN.
   - `src/main/resources/theme-resources/messages/messages_en.properties` defines `loginSyncFailed`
     with a user-facing sentence; without it Keycloak renders the raw key to the end user.
-  **Acceptance criteria:** `scripts/test.sh clean package` exits 0.
-  `unzip -p target/keycloak-login-sync-provider-0.1.0.jar META-INF/services/org.keycloak.authentication.AuthenticatorFactory`
-  prints exactly the factory FQCN and nothing else.
-  `unzip -l target/keycloak-login-sync-provider-0.1.0.jar | grep -c 'theme-resources/messages/messages_en.properties'`
-  returns 1. A unit test asserts `getConfigProperties()` is non-null and empty and that
-  `getRequirementChoices()` contains exactly REQUIRED and DISABLED. A unit test asserts that with
-  an unconfigured `Config.Scope`, `init()` does not throw and no `SyncClient` is constructed.
-  **QA happy:** both `unzip` commands print the expected contents. Evidence: `.omo/evidence/60-jar-contents.log`.
-  **QA failure:** rename the services file, rebuild, and confirm the `unzip -p` assertion fails
-  because the entry is absent; restore it, rebuild, confirm it passes and `git status --porcelain`
-  is clean. Evidence: `.omo/evidence/60-jar-missing-services.log`.
-  **Commit:** `feat: add login sync authenticator factory and SPI registration`
+    **Acceptance criteria:** `scripts/test.sh clean package` exits 0.
+    `unzip -p target/keycloak-login-sync-provider-0.1.0.jar META-INF/services/org.keycloak.authentication.AuthenticatorFactory`
+    prints exactly the factory FQCN and nothing else.
+    `unzip -l target/keycloak-login-sync-provider-0.1.0.jar | grep -c 'theme-resources/messages/messages_en.properties'`
+    returns 1. A unit test asserts `getConfigProperties()` is non-null and empty and that
+    `getRequirementChoices()` contains exactly REQUIRED and DISABLED. A unit test asserts that with
+    an unconfigured `Config.Scope`, `init()` does not throw and no `SyncClient` is constructed.
+    **QA happy:** both `unzip` commands print the expected contents. Evidence: `.omo/evidence/60-jar-contents.log`.
+    **QA failure:** rename the services file, rebuild, and confirm the `unzip -p` assertion fails
+    because the entry is absent; restore it, rebuild, confirm it passes and `git status --porcelain`
+    is clean. Evidence: `.omo/evidence/60-jar-missing-services.log`.
+    **Commit:** `feat: add login sync authenticator factory and SPI registration`
 
 - [ ] 2. `LoginSyncAuthenticator.java`: per-request logic with guaranteed permit settlement - expect every skip to call `success()` and never `attempted()`
 
@@ -189,28 +189,28 @@ Per invariant P1 every check names a command; per P3 record `BASE_SHA`.
     6. `Permit permit = breaker.acquirePermit();` If `!permit.allowsSync()`, settle it
        `ABANDONED`, log DEBUG, and `context.success()` - the login proceeds unsynced. Return.
     7. Otherwise, in a `try { ... } catch (SyncFailedException e) { outcome = e.outcome(); }
-       catch (RuntimeException e) { outcome = TRANSPORT_ERROR; } finally { permit.complete(outcome.breakerOutcome()); }`
+catch (RuntimeException e) { outcome = TRANSPORT_ERROR; } finally { permit.complete(outcome.breakerOutcome()); }`
        structure, call `SyncClient.send(payload)` **outside any lock** and capture the
        `SyncOutcome`. The `finally` guarantees **exactly one** settlement on every path (A9) -
        without it a thrown exception strands the sole HALF_OPEN probe permit forever.
     8. Outcome mapping is **data-driven** (A10): if `outcome.blocksLogin()` is false call
        `context.success()`; otherwise call
        `context.failure(AuthenticationFlowError.INTERNAL_ERROR,
-       context.form().setError("loginSyncFailed").createErrorPage(Response.Status.INTERNAL_SERVER_ERROR),
-       "login_sync_failed", "loginSyncFailed")`. Do not re-derive the mapping with a local
+context.form().setError("loginSyncFailed").createErrorPage(Response.Status.INTERNAL_SERVER_ERROR),
+"login_sync_failed", "loginSyncFailed")`. Do not re-derive the mapping with a local
        `switch`; the enum owns it, so a new outcome cannot be added without a decision.
   - Logging: never the token, payload body, email or group path. The only WARN in the feature is
     the breaker's transition into OPEN, emitted by the breaker.
   - Class Javadoc records A8 and the A0 constraint with its source references.
-  **Acceptance criteria:** compiles; `scripts/test.sh clean verify` exits 0.
-  `grep -c 'attempted()' src/main/java -r` returns **0**.
-  `grep -rcE 'session\.tokens\(\)|createClientAccessToken' src/main/java` returns 0.
-  `grep -c 'finally' LoginSyncAuthenticator.java` >= 1.
-  **QA happy:** `scripts/test.sh clean verify` exits 0 and the `attempted()` grep returns 0.
-  Evidence: `.omo/evidence/60-authenticator-verify.log`.
-  **QA failure:** `grep -rc 'session.tokens()' src/main/java` returns 0, proving no user-token path
-  exists. Evidence: `.omo/evidence/60-authenticator-notoken.log`.
-  **Commit:** `feat: add login sync authenticator`
+    **Acceptance criteria:** compiles; `scripts/test.sh clean verify` exits 0.
+    `grep -c 'attempted()' src/main/java -r` returns **0**.
+    `grep -rcE 'session\.tokens\(\)|createClientAccessToken' src/main/java` returns 0.
+    `grep -c 'finally' LoginSyncAuthenticator.java` >= 1.
+    **QA happy:** `scripts/test.sh clean verify` exits 0 and the `attempted()` grep returns 0.
+    Evidence: `.omo/evidence/60-authenticator-verify.log`.
+    **QA failure:** `grep -rc 'session.tokens()' src/main/java` returns 0, proving no user-token path
+    exists. Evidence: `.omo/evidence/60-authenticator-notoken.log`.
+    **Commit:** `feat: add login sync authenticator`
 
 - [ ] 3. `LoginSyncAuthenticatorTest.java`: cover every branch - expect each skip to assert `success()`, never `attempted()`, and no sync call
 
@@ -239,15 +239,15 @@ Per invariant P1 every check names a command; per P3 record `BASE_SHA`.
   - **HALF_OPEN trial that throws:** assert a subsequent caller can still obtain a trial permit,
     proving the slot was released and the breaker did not strand.
   - **`action(...)`:** throws `IllegalStateException`.
-  **Acceptance criteria:** `scripts/test.sh test -Dtest=LoginSyncAuthenticatorTest` exits 0 with
-  all sixteen cases asserted.
-  **QA happy:** the suite exits 0. Evidence: `.omo/evidence/60-authenticator-test.log`.
-  **QA failure:** in a committed faulty test fixture, replace the flow-path default branch with a
-  fall-through to the sync; the unknown-flow-path test must fail; point back at the real
-  implementation and confirm it passes. Separately, change one skip branch's fixture to call
-  `attempted()` and confirm the `never()).attempted()` assertion fails - proving the regression
-  guard for the revision-1 defect is live. Evidence: `.omo/evidence/60-authenticator-flowpath-fail.log`.
-  **Commit:** `test: cover every authenticator branch`
+    **Acceptance criteria:** `scripts/test.sh test -Dtest=LoginSyncAuthenticatorTest` exits 0 with
+    all sixteen cases asserted.
+    **QA happy:** the suite exits 0. Evidence: `.omo/evidence/60-authenticator-test.log`.
+    **QA failure:** in a committed faulty test fixture, replace the flow-path default branch with a
+    fall-through to the sync; the unknown-flow-path test must fail; point back at the real
+    implementation and confirm it passes. Separately, change one skip branch's fixture to call
+    `attempted()` and confirm the `never()).attempted()` assertion fails - proving the regression
+    guard for the revision-1 defect is live. Evidence: `.omo/evidence/60-authenticator-flowpath-fail.log`.
+    **Commit:** `test: cover every authenticator branch`
 
 ## Final verification wave
 

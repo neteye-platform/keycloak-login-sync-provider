@@ -53,14 +53,14 @@ re-introduced by a later plan.
 
 ## Key decisions
 
-| id | decision | rationale |
-|----|----------|-----------|
-| R1 | Config property is `service-endpoint`, env `KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SERVICE_ENDPOINT` | user decision; the only spelling with measured evidence |
-| R2 | LLD 4.3.1 names it `endpoint`; that is **flagged for alignment**, not adopted | user instruction; document and implementation must be reconciled by the LLD owner |
-| R3 | `provided` Jackson pinned to 2.21.2 | matches what Keycloak 26.7.0 actually ships |
-| R4 | Circuit-breaker logging deviates from LLD 3.2 | user instruction supersedes; recorded as an explicit deviation |
-| R5 | D21 (reuse the user's JWT) is **closed as not viable**; D24 void | LLD 3.3 decided Client Credentials, and the spike proved the user token unreachable |
-| R6 | Delivery semantics are **at-most-once, non-deduplicable, non-correlatable** | consequence of the LLD-fixed six-field payload; must be documented, not discovered in production |
+| id  | decision                                                                                        | rationale                                                                                        |
+| --- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| R1  | Config property is `service-endpoint`, env `KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SERVICE_ENDPOINT` | user decision; the only spelling with measured evidence                                          |
+| R2  | LLD 4.3.1 names it `endpoint`; that is **flagged for alignment**, not adopted                   | user instruction; document and implementation must be reconciled by the LLD owner                |
+| R3  | `provided` Jackson pinned to 2.21.2                                                             | matches what Keycloak 26.7.0 actually ships                                                      |
+| R4  | Circuit-breaker logging deviates from LLD 3.2                                                   | user instruction supersedes; recorded as an explicit deviation                                   |
+| R5  | D21 (reuse the user's JWT) is **closed as not viable**; D24 void                                | LLD 3.3 decided Client Credentials, and the spike proved the user token unreachable              |
+| R6  | Delivery semantics are **at-most-once, non-deduplicable, non-correlatable**                     | consequence of the LLD-fixed six-field payload; must be documented, not discovered in production |
 
 ---
 
@@ -75,10 +75,10 @@ Both documents must be `git add`-ed before prek runs, because prek only inspects
 
 ## Execution strategy
 
-| wave | todos | depends on |
-|------|-------|-----------|
-| 1 | 1, 2 | - |
-| F | F1, F2 | 1, 2 |
+| wave | todos  | depends on |
+| ---- | ------ | ---------- |
+| 1    | 1, 2   | -          |
+| F    | F1, F2 | 1, 2       |
 
 Todos 1 and 2 touch different files and may be done in either order. Record `BASE_SHA=$(git rev-parse HEAD)`
 before the first commit (portfolio invariant P3).
@@ -124,19 +124,19 @@ before the first commit (portfolio invariant P3).
     skip calls `context.success()`. Also record that `requiresUser()==true` throws before
     `authenticate()` is invoked when no user is set, so a misplaced execution is rejected by
     Keycloak rather than skipping.
-  Close with a "Superseded plans" note stating `.omo/plans/keycloak-login-sync-provider.md` is
-  superseded in full and must not be executed.
-  **Acceptance criteria:** run `for i in $(seq -w 1 12); do grep -q "R-$i" docs/DECISIONS.md || echo "MISSING R-$i"; done`
-  and expect **no output**. Run `grep -c 'ACTION REQUIRED: LLD owner' docs/DECISIONS.md` expecting
-  `1`. Run `grep -q 'This is not a retry' docs/DECISIONS.md` expecting exit 0. Run
-  `grep -q 'context.success()' docs/DECISIONS.md` expecting exit 0. Run
-  `markdownlint-cli2 docs/DECISIONS.md` expecting exit 0.
-  **QA happy:** `git add docs/DECISIONS.md && prek run markdownlint-cli2 --all-files` exits 0 and
-  the R-01..R-12 loop prints nothing. Evidence: `.omo/evidence/10-decisions-lint.log`.
-  **QA failure:** delete the `R-07` row, re-run the loop, and confirm it prints exactly
-  `MISSING R-07` and the check fails; restore the row, re-run, and confirm no output. Then confirm
-  `git status --porcelain docs/` is clean. Evidence: `.omo/evidence/10-decisions-grep-fail.log`.
-  **Commit:** `docs: reconcile implementation decisions with updated LLD`
+    Close with a "Superseded plans" note stating `.omo/plans/keycloak-login-sync-provider.md` is
+    superseded in full and must not be executed.
+    **Acceptance criteria:** run `for i in $(seq -w 1 12); do grep -q "R-$i" docs/DECISIONS.md || echo "MISSING R-$i"; done`
+    and expect **no output**. Run `grep -c 'ACTION REQUIRED: LLD owner' docs/DECISIONS.md` expecting
+    `1`. Run `grep -q 'This is not a retry' docs/DECISIONS.md` expecting exit 0. Run
+    `grep -q 'context.success()' docs/DECISIONS.md` expecting exit 0. Run
+    `markdownlint-cli2 docs/DECISIONS.md` expecting exit 0.
+    **QA happy:** `git add docs/DECISIONS.md && prek run markdownlint-cli2 --all-files` exits 0 and
+    the R-01..R-12 loop prints nothing. Evidence: `.omo/evidence/10-decisions-lint.log`.
+    **QA failure:** delete the `R-07` row, re-run the loop, and confirm it prints exactly
+    `MISSING R-07` and the check fails; restore the row, re-run, and confirm no output. Then confirm
+    `git status --porcelain docs/` is clean. Evidence: `.omo/evidence/10-decisions-grep-fail.log`.
+    **Commit:** `docs: reconcile implementation decisions with updated LLD`
 
 - [ ] 2. `docs/SYNC-CONTRACT.md`: document the external receiver contract and its delivery semantics - expect every undecided item flagged and the deduplication limit stated
 
@@ -170,17 +170,17 @@ before the first commit (portfolio invariant P3).
     that the payload MUST NOT be extended without a contract revision agreed with the receiver
     owner, and that if correlation later becomes necessary the agreed mechanism should be a
     transport header rather than a body field, so the LLD-fixed body stays intact.
-  **Acceptance criteria:** run
-  `for s in 'JWKS' 'exp' 'iss' 'aud' 'least-privilege' 'NOT decided' 'NOT IMPLEMENTED' '/api/sync-user' 'SYNC_USER_PATH' 'not the logging-in user' 'at-most-once' 'must not' 'byte-identical'; do grep -qF "$s" docs/SYNC-CONTRACT.md || echo "MISSING $s"; done`
-  and expect **no output**. Run `grep -cE '^\s*(public|private|def|func) ' docs/SYNC-CONTRACT.md`
-  expecting `0`, proving no receiver implementation leaked in. Run
-  `markdownlint-cli2 docs/SYNC-CONTRACT.md` expecting exit 0.
-  **QA happy:** `git add docs/SYNC-CONTRACT.md && prek run markdownlint-cli2 --all-files` exits 0
-  and the string loop prints nothing. Evidence: `.omo/evidence/10-contract-lint.log`.
-  **QA failure:** remove the `at-most-once` sentence, re-run the loop, confirm it prints
-  `MISSING at-most-once`; restore it, re-run, confirm no output and a clean
-  `git status --porcelain docs/`. Evidence: `.omo/evidence/10-contract-noimpl.log`.
-  **Commit:** `docs: document external syncservice contract and delivery semantics`
+    **Acceptance criteria:** run
+    `for s in 'JWKS' 'exp' 'iss' 'aud' 'least-privilege' 'NOT decided' 'NOT IMPLEMENTED' '/api/sync-user' 'SYNC_USER_PATH' 'not the logging-in user' 'at-most-once' 'must not' 'byte-identical'; do grep -qF "$s" docs/SYNC-CONTRACT.md || echo "MISSING $s"; done`
+    and expect **no output**. Run `grep -cE '^\s*(public|private|def|func) ' docs/SYNC-CONTRACT.md`
+    expecting `0`, proving no receiver implementation leaked in. Run
+    `markdownlint-cli2 docs/SYNC-CONTRACT.md` expecting exit 0.
+    **QA happy:** `git add docs/SYNC-CONTRACT.md && prek run markdownlint-cli2 --all-files` exits 0
+    and the string loop prints nothing. Evidence: `.omo/evidence/10-contract-lint.log`.
+    **QA failure:** remove the `at-most-once` sentence, re-run the loop, confirm it prints
+    `MISSING at-most-once`; restore it, re-run, confirm no output and a clean
+    `git status --porcelain docs/`. Evidence: `.omo/evidence/10-contract-noimpl.log`.
+    **Commit:** `docs: document external syncservice contract and delivery semantics`
 
 ## Final verification wave
 

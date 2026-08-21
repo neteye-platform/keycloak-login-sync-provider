@@ -25,13 +25,13 @@ attempt per login and never retries.
 **Why revision 2 changed invalidation.** Both reviewers found the same race. Revision 1 said a
 401/403 calls `invalidate()`, which clears the cache unconditionally. Under load many logins share
 one token; if the service-account key rotates, N concurrent requests all get 401 and all call
-`invalidate()` - and a slow thread holding the *old* token can wipe the *new* token another thread
+`invalidate()` - and a slow thread holding the _old_ token can wipe the _new_ token another thread
 just installed, producing a self-sustaining invalidation storm and a thundering herd against
 Keycloak's token endpoint. Invalidation is now `invalidateIfCurrent(handle)`: a no-op unless the
 caller's own token generation is still the cached one.
 
 **Also fixed:** the token fetch previously had **no timeout at all** on a blocking login path, and
-its failure would have been recorded against the *receiver's* circuit breaker - so an outage of
+its failure would have been recorded against the _receiver's_ circuit breaker - so an outage of
 Keycloak's own token endpoint would open a circuit that claims the receiver is down.
 
 **What it will NOT do.** No retry, no backoff. No user token. No async, queue or outbox.
@@ -73,21 +73,21 @@ bounded.
 
 ## Key decisions
 
-| id | decision | rationale |
-|----|----------|-----------|
-| T1 | One `SyncFailedException` carrying a `SyncOutcome` | with retry deleted there is no behavioural difference between failure classes |
-| T2 | 401/403: fail this login, `invalidateIfCurrent(handle)`, do **not** re-POST | LLD 3.7; a rotated key self-heals on the next login instead of blocking every login until natural expiry |
-| T3 | 60-second refresh margin before `exp` | avoids sending a token that expires in flight |
-| T4 | Missing or non-positive `expires_in` means "expires immediately" | the opposite choice yields a permanently stale token that silently stops working |
-| T5 | Single-flight refresh | 200 concurrent logins on an expired token must produce one token request |
-| T6 | Bulkhead `tryAcquire` failure is a **skip that permits the login**, never a queued wait | a black-holed receiver would otherwise exhaust Keycloak's worker threads before the breaker trips |
-| T7 | `HttpClient` builds its `SSLContext` from Keycloak's truststore | a raw `HttpClient` ignores `KC_TRUSTSTORE_PATHS` and would fail only in production against an internal CA |
-| T8 | A token-endpoint failure fails the current login as `TOKEN_UNAVAILABLE` | LLD 3.7 |
-| **T9** | **`invalidateIfCurrent(TokenHandle)` replaces `invalidate()`** | **review: unconditional invalidation lets a stale 401 evict a freshly installed valid token, causing an invalidation storm** |
-| **T10** | **The token fetch happens OUTSIDE the sync bulkhead, with its own bounded connect and request timeouts** | **review: revision 1 left it unbounded (a hang risk on a blocking login path) and inside the bulkhead (a slow Keycloak consumes the receiver's concurrency budget)** |
-| **T11** | **`TOKEN_UNAVAILABLE` settles the breaker permit as `ABANDONED`, not `FAILURE`** | **review: attributing Keycloak's own outage to the receiver's breaker opens a circuit that misdescribes reality** |
-| **T12** | **A failed single-flight future must be evicted, never cached** | **a memoised failed future would make every subsequent login fail permanently** |
-| **T13** | **Explicit ordering: breaker permit -> bounded token fetch (outside bulkhead) -> bulkhead `tryAcquire` -> sync POST -> settle permit in `finally`** | **removes the last ordering ambiguity between plans 40, 50 and 60** |
+| id      | decision                                                                                                                                            | rationale                                                                                                                                                            |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T1      | One `SyncFailedException` carrying a `SyncOutcome`                                                                                                  | with retry deleted there is no behavioural difference between failure classes                                                                                        |
+| T2      | 401/403: fail this login, `invalidateIfCurrent(handle)`, do **not** re-POST                                                                         | LLD 3.7; a rotated key self-heals on the next login instead of blocking every login until natural expiry                                                             |
+| T3      | 60-second refresh margin before `exp`                                                                                                               | avoids sending a token that expires in flight                                                                                                                        |
+| T4      | Missing or non-positive `expires_in` means "expires immediately"                                                                                    | the opposite choice yields a permanently stale token that silently stops working                                                                                     |
+| T5      | Single-flight refresh                                                                                                                               | 200 concurrent logins on an expired token must produce one token request                                                                                             |
+| T6      | Bulkhead `tryAcquire` failure is a **skip that permits the login**, never a queued wait                                                             | a black-holed receiver would otherwise exhaust Keycloak's worker threads before the breaker trips                                                                    |
+| T7      | `HttpClient` builds its `SSLContext` from Keycloak's truststore                                                                                     | a raw `HttpClient` ignores `KC_TRUSTSTORE_PATHS` and would fail only in production against an internal CA                                                            |
+| T8      | A token-endpoint failure fails the current login as `TOKEN_UNAVAILABLE`                                                                             | LLD 3.7                                                                                                                                                              |
+| **T9**  | **`invalidateIfCurrent(TokenHandle)` replaces `invalidate()`**                                                                                      | **review: unconditional invalidation lets a stale 401 evict a freshly installed valid token, causing an invalidation storm**                                         |
+| **T10** | **The token fetch happens OUTSIDE the sync bulkhead, with its own bounded connect and request timeouts**                                            | **review: revision 1 left it unbounded (a hang risk on a blocking login path) and inside the bulkhead (a slow Keycloak consumes the receiver's concurrency budget)** |
+| **T11** | **`TOKEN_UNAVAILABLE` settles the breaker permit as `ABANDONED`, not `FAILURE`**                                                                    | **review: attributing Keycloak's own outage to the receiver's breaker opens a circuit that misdescribes reality**                                                    |
+| **T12** | **A failed single-flight future must be evicted, never cached**                                                                                     | **a memoised failed future would make every subsequent login fail permanently**                                                                                      |
+| **T13** | **Explicit ordering: breaker permit -> bounded token fetch (outside bulkhead) -> bulkhead `tryAcquire` -> sync POST -> settle permit in `finally`** | **removes the last ordering ambiguity between plans 40, 50 and 60**                                                                                                  |
 
 ---
 
@@ -96,7 +96,7 @@ bounded.
 **TDD for `ServiceAccountTokenProvider`**; tests-after for `SyncClient`.
 
 Unit tests run against a local in-JVM `com.sun.net.httpserver.HttpServer`. This is permitted:
-the LLD restricts *end-to-end* token issuance to the real Keycloak container, which plan 70
+the LLD restricts _end-to-end_ token issuance to the real Keycloak container, which plan 70
 honours. Unit tests may stub the token endpoint locally.
 
 The single most important assertion is a **request counter equal to 1** - it is what proves the
@@ -109,12 +109,12 @@ Per invariant P1 every check names a command and expected result; per P3 record 
 
 ## Execution strategy
 
-| wave | todos | depends on |
-|------|-------|-----------|
-| 1 | 1 | - |
-| 2 | 2 | 1 |
-| 3 | 3 | 1, 2 |
-| F | F1, F2 | 1, 2, 3 |
+| wave | todos  | depends on |
+| ---- | ------ | ---------- |
+| 1    | 1      | -          |
+| 2    | 2      | 1          |
+| 3    | 3      | 1, 2       |
+| F    | F1, F2 | 1, 2, 3    |
 
 Strictly sequential.
 
@@ -175,23 +175,23 @@ Strictly sequential.
     `SyncOutcome.TOKEN_UNAVAILABLE` after exactly one attempt (T8).
   - The raw token MUST NOT appear in any log, exception message or `toString()`; `TokenHandle`
     overrides `toString()` to render only the generation.
-  **Tests:** a cached token is reused (counter stays 1 over many calls); a near-expiry token
-  refreshes; **32 concurrent callers on an expired token trigger exactly one request**; a token
-  endpoint 500 raises `TOKEN_UNAVAILABLE` after exactly one attempt; a response without
-  `expires_in` refetches next call; **the interleaving test** - acquire handle G1, invalidate it,
-  let another thread install G2, then have the delayed G1 holder call
-  `invalidateIfCurrent(G1)` and assert **G2 remains cached**; a failed refresh future is evicted so
-  the next call retries the fetch (this is a *new fetch on a new call*, not a retry within one
-  call); a request that exceeds the token timeout fails rather than hanging; no log, exception
-  message or `toString()` contains the token or secret.
-  **Acceptance criteria:** `scripts/test.sh test -Dtest=ServiceAccountTokenProviderTest` exits 0
-  with all of the above, including the G1/G2 interleaving assertion.
-  **QA happy:** the suite exits 0. Evidence: `.omo/evidence/50-token-test.log`.
-  **QA failure:** replace `invalidateIfCurrent` with an unconditional clear in a committed faulty
-  test fixture; the G1/G2 interleaving test must fail showing G2 evicted; point the test back at
-  the real implementation and confirm it passes. No production source is edited, so
-  `git status --porcelain` stays clean. Evidence: `.omo/evidence/50-token-invalidation-race.log`.
-  **Commit:** `feat: add generation-guarded cached service-account token provider`
+    **Tests:** a cached token is reused (counter stays 1 over many calls); a near-expiry token
+    refreshes; **32 concurrent callers on an expired token trigger exactly one request**; a token
+    endpoint 500 raises `TOKEN_UNAVAILABLE` after exactly one attempt; a response without
+    `expires_in` refetches next call; **the interleaving test** - acquire handle G1, invalidate it,
+    let another thread install G2, then have the delayed G1 holder call
+    `invalidateIfCurrent(G1)` and assert **G2 remains cached**; a failed refresh future is evicted so
+    the next call retries the fetch (this is a _new fetch on a new call_, not a retry within one
+    call); a request that exceeds the token timeout fails rather than hanging; no log, exception
+    message or `toString()` contains the token or secret.
+    **Acceptance criteria:** `scripts/test.sh test -Dtest=ServiceAccountTokenProviderTest` exits 0
+    with all of the above, including the G1/G2 interleaving assertion.
+    **QA happy:** the suite exits 0. Evidence: `.omo/evidence/50-token-test.log`.
+    **QA failure:** replace `invalidateIfCurrent` with an unconditional clear in a committed faulty
+    test fixture; the G1/G2 interleaving test must fail showing G2 evicted; point the test back at
+    the real implementation and confirm it passes. No production source is edited, so
+    `git status --porcelain` stays clean. Evidence: `.omo/evidence/50-token-invalidation-race.log`.
+    **Commit:** `feat: add generation-guarded cached service-account token provider`
 
 - [ ] 3. `SyncClient.java` + test: one-attempt POST with bulkhead - expect exactly one HTTP attempt for every failure mode
 
@@ -216,23 +216,23 @@ Strictly sequential.
     comment forbidding JDK `java.net.http` header-level diagnostic logging
     (`jdk.httpclient.HttpClient.log`) in production, since it would print the `Authorization`
     header.
-  **Tests** (local stub): 200 succeeds; 201 succeeds; **400 makes exactly one attempt** yielding
-  `REJECTED`; **401 makes exactly one attempt**, yields `UNAUTHORIZED`, and calls
-  `invalidateIfCurrent` exactly once with the handle used; 403 likewise; **500 makes exactly one
-  attempt** yielding `SERVER_ERROR`; a timeout makes exactly one attempt yielding `TIMEOUT`;
-  semaphore exhaustion yields `SKIPPED_SATURATED` with **zero** HTTP calls; the request carries a
-  `Bearer `-prefixed `Authorization` header and `Content-Type: application/json`; the captured
-  body equals the exact `SyncPayload` JSON; and a test asserting the token fetch occurs **before**
-  the semaphore is acquired (assert the semaphore's available permits are untouched while a
-  deliberately slow token endpoint is responding).
-  **Acceptance criteria:** `scripts/test.sh test -Dtest=SyncClientTest` exits 0 with the stub's
-  request counter asserted **exactly 1** in each of the 400/401/403/500/timeout cases and
-  **exactly 0** in the saturated case.
-  **QA happy:** the suite exits 0. Evidence: `.omo/evidence/50-syncclient-test.log`.
-  **QA failure:** in a committed faulty test fixture, wrap the POST in a one-retry loop; the 500
-  test must fail reporting a request count of 2; point back at the real implementation and confirm
-  the count is 1. This is the assertion that proves the LLD's no-retry rule is enforced. Evidence: `.omo/evidence/50-syncclient-noretry.log`.
-  **Commit:** `feat: add one-attempt sync client with bulkhead`
+    **Tests** (local stub): 200 succeeds; 201 succeeds; **400 makes exactly one attempt** yielding
+    `REJECTED`; **401 makes exactly one attempt**, yields `UNAUTHORIZED`, and calls
+    `invalidateIfCurrent` exactly once with the handle used; 403 likewise; **500 makes exactly one
+    attempt** yielding `SERVER_ERROR`; a timeout makes exactly one attempt yielding `TIMEOUT`;
+    semaphore exhaustion yields `SKIPPED_SATURATED` with **zero** HTTP calls; the request carries a
+    `Bearer`-prefixed `Authorization` header and `Content-Type: application/json`; the captured
+    body equals the exact `SyncPayload` JSON; and a test asserting the token fetch occurs **before**
+    the semaphore is acquired (assert the semaphore's available permits are untouched while a
+    deliberately slow token endpoint is responding).
+    **Acceptance criteria:** `scripts/test.sh test -Dtest=SyncClientTest` exits 0 with the stub's
+    request counter asserted **exactly 1** in each of the 400/401/403/500/timeout cases and
+    **exactly 0** in the saturated case.
+    **QA happy:** the suite exits 0. Evidence: `.omo/evidence/50-syncclient-test.log`.
+    **QA failure:** in a committed faulty test fixture, wrap the POST in a one-retry loop; the 500
+    test must fail reporting a request count of 2; point back at the real implementation and confirm
+    the count is 1. This is the assertion that proves the LLD's no-retry rule is enforced. Evidence: `.omo/evidence/50-syncclient-noretry.log`.
+    **Commit:** `feat: add one-attempt sync client with bulkhead`
 
 ## Final verification wave
 

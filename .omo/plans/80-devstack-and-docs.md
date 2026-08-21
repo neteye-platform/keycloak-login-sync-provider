@@ -10,7 +10,7 @@ owns_files:
   - podman-compose.yml
   - .env.example
   - Makefile
-  - README.md   # Configuration / Deployment / Limitations sections
+  - README.md # Configuration / Deployment / Limitations sections
 ```
 
 ## TL;DR (For humans)
@@ -20,7 +20,7 @@ Keycloak with the plugin bind-mounted plus a mock receiver, driven by a Makefile
 operator-facing documentation: every environment variable verbatim, the deployment constraint that
 makes or breaks the plugin, and an honest limitations section.
 
-**Why revision 2 demoted this plan to a hard dependency.** Revision 1 declared plan 70 a *soft*
+**Why revision 2 demoted this plan to a hard dependency.** Revision 1 declared plan 70 a _soft_
 prerequisite while also claiming the two could run in parallel. Both reviewers rejected that: the
 compose stack runs plan 70's `MockSyncService`, so if this plan ran first `make up` could not work
 at all. Worse, revision 1 said the mock runs "from the built test artifact" - **the Maven build
@@ -61,15 +61,15 @@ second mock implementation. No Python. No `.gitignore` edit (plan 20 owns that f
 
 ## Key decisions
 
-| id | decision | rationale |
-|----|----------|-----------|
-| E1 | One mock implementation, owned by plan 70, reused here | two mocks drift, and the drift surfaces in production |
-| E2 | No Dockerfile and no RPM spec | LLD section 6; downstream repos own packaging |
-| E3 | `.env.example` committed with placeholders; `.env` ignored by plan 20 | operators get a template without a secret entering git history |
-| E4 | The README documents the nine operator-facing keys only | the bulkhead and token timeouts are internal constants |
-| E5 | The execution-position constraint gets its own section | it is the single misconfiguration that breaks every login in a realm |
-| **E6** | **The mock runs from mounted `target/test-classes`, not a test jar** | **review: the Maven build produces no test jar, so revision 1's instruction was unimplementable** |
-| **E7** | **Plan 70 is a hard prerequisite; this plan is not parallel with anything** | **review: the stack cannot start without plan 70's `MockSyncService`** |
+| id     | decision                                                                                                       | rationale                                                                                                                                        |
+| ------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| E1     | One mock implementation, owned by plan 70, reused here                                                         | two mocks drift, and the drift surfaces in production                                                                                            |
+| E2     | No Dockerfile and no RPM spec                                                                                  | LLD section 6; downstream repos own packaging                                                                                                    |
+| E3     | `.env.example` committed with placeholders; `.env` ignored by plan 20                                          | operators get a template without a secret entering git history                                                                                   |
+| E4     | The README documents the nine operator-facing keys only                                                        | the bulkhead and token timeouts are internal constants                                                                                           |
+| E5     | The execution-position constraint gets its own section                                                         | it is the single misconfiguration that breaks every login in a realm                                                                             |
+| **E6** | **The mock runs from mounted `target/test-classes`, not a test jar**                                           | **review: the Maven build produces no test jar, so revision 1's instruction was unimplementable**                                                |
+| **E7** | **Plan 70 is a hard prerequisite; this plan is not parallel with anything**                                    | **review: the stack cannot start without plan 70's `MockSyncService`**                                                                           |
 | **E8** | **The Limitations section must state the at-most-once, non-deduplicable, non-correlatable delivery semantics** | **review: the fixed six-field payload has no idempotency or correlation identifier, and operators must know before an incident, not during one** |
 
 ---
@@ -90,12 +90,12 @@ Per invariant P1 every check names a command; per P3 record `BASE_SHA`.
 
 ## Execution strategy
 
-| wave | todos | depends on |
-|------|-------|-----------|
-| 1 | 1 | - |
-| 2 | 2 | 1 |
-| 3 | 3 | 1, 2 |
-| F | F1, F2 | 1, 2, 3 |
+| wave | todos  | depends on |
+| ---- | ------ | ---------- |
+| 1    | 1      | -          |
+| 2    | 2      | 1          |
+| 3    | 3      | 1, 2       |
+| F    | F1, F2 | 1, 2, 3    |
 
 Todo 3 comes last so the documented Makefile targets and env names match what exists.
 
@@ -120,21 +120,21 @@ Todo 3 comes last so the documented Makefile targets and env names match what ex
     **from a bind-mounted `./target/test-classes`** on the classpath (E6) - the build produces no
     test jar, so do not reference one. No Python, no second implementation (E1). Publish its port
     so `/__control` is reachable from the host for manual mode switching.
-  Create `.env.example` with every variable and **placeholder** values only (E3). Do **not** edit
-  `.gitignore`; plan 20 already ignores `.env`. Add a comment stating the stack carries
-  configuration only and MUST NOT provision realms, clients or roles.
-  **Acceptance criteria:** `podman-compose -f podman-compose.yml config` exits 0.
-  `grep -c 'KC_SPI_AUTHENTICATOR__LOGIN_SYNC__' podman-compose.yml` returns 9.
-  `grep -c 'KC_SPI_AUTHENTICATOR_LOGIN_SYNC_' podman-compose.yml` returns 0 - the single-underscore
-  form must be absent. `grep -c 'test-classes' podman-compose.yml` returns >= 1.
-  `grep -rciE 'jar' podman-compose.yml | grep -qv 'test-jar'` - assert no test-jar reference.
-  `git check-ignore -q .env` exits 0 (inherited from plan 20).
-  **QA happy:** `make up && make logs` shows both services healthy and the container log contains
-  the `login-sync` provider; then `make down`. Evidence: `.omo/evidence/80-compose-up.log`.
-  **QA failure:** run `grep -rnE '(password|secret)\s*=\s*\S+' .env.example` and assert every value
-  matches a placeholder pattern such as `CHANGEME` or `<...>`; then assert
-  `git check-ignore -q .env` exits 0, proving a real `.env` cannot be committed. Evidence: `.omo/evidence/80-compose-secrets.log`.
-  **Commit:** `chore: add podman-compose local development stack`
+    Create `.env.example` with every variable and **placeholder** values only (E3). Do **not** edit
+    `.gitignore`; plan 20 already ignores `.env`. Add a comment stating the stack carries
+    configuration only and MUST NOT provision realms, clients or roles.
+    **Acceptance criteria:** `podman-compose -f podman-compose.yml config` exits 0.
+    `grep -c 'KC_SPI_AUTHENTICATOR__LOGIN_SYNC__' podman-compose.yml` returns 9.
+    `grep -c 'KC_SPI_AUTHENTICATOR_LOGIN_SYNC_' podman-compose.yml` returns 0 - the single-underscore
+    form must be absent. `grep -c 'test-classes' podman-compose.yml` returns >= 1.
+    `grep -rciE 'jar' podman-compose.yml | grep -qv 'test-jar'` - assert no test-jar reference.
+    `git check-ignore -q .env` exits 0 (inherited from plan 20).
+    **QA happy:** `make up && make logs` shows both services healthy and the container log contains
+    the `login-sync` provider; then `make down`. Evidence: `.omo/evidence/80-compose-up.log`.
+    **QA failure:** run `grep -rnE '(password|secret)\s*=\s*\S+' .env.example` and assert every value
+    matches a placeholder pattern such as `CHANGEME` or `<...>`; then assert
+    `git check-ignore -q .env` exits 0, proving a real `.env` cannot be committed. Evidence: `.omo/evidence/80-compose-secrets.log`.
+    **Commit:** `chore: add podman-compose local development stack`
 
 - [ ] 2. `Makefile`: the local feedback loop - expect `make reset` to leave nothing behind
 
@@ -150,17 +150,17 @@ Todo 3 comes last so the documented Makefile targets and env names match what ex
   - `logs` - follow both services' logs.
   - `test` - `scripts/test.sh clean verify`.
   - `fmt` - `scripts/test.sh spotless:apply`.
-  Declare all targets `.PHONY`. Add no target that provisions a realm, client or role.
-  **Acceptance criteria:** `make -n build deploy up down reset logs test fmt` prints a command for
-  each of the eight targets and exits 0. `make build` produces
-  `target/keycloak-login-sync-provider-0.1.0.jar` **and** a non-empty `target/test-classes/`.
-  `grep -c '^\.PHONY' Makefile` >= 1. `grep -cE '^\s+mvn ' Makefile` returns 0 - all Maven calls go
-  through `scripts/test.sh`.
-  **QA happy:** `make build && make up && make logs` succeeds and shows the provider loaded; then
-  `make down`. Evidence: `.omo/evidence/80-make-targets.log`.
-  **QA failure:** `make reset`, then assert `podman ps -a --format '{{.Names}}' | grep -c login-sync`
-  returns 0 and `test ! -d target` exits 0, proving the reset is complete. Evidence: `.omo/evidence/80-make-reset.log`.
-  **Commit:** `chore: add Makefile for the local development loop`
+    Declare all targets `.PHONY`. Add no target that provisions a realm, client or role.
+    **Acceptance criteria:** `make -n build deploy up down reset logs test fmt` prints a command for
+    each of the eight targets and exits 0. `make build` produces
+    `target/keycloak-login-sync-provider-0.1.0.jar` **and** a non-empty `target/test-classes/`.
+    `grep -c '^\.PHONY' Makefile` >= 1. `grep -cE '^\s+mvn ' Makefile` returns 0 - all Maven calls go
+    through `scripts/test.sh`.
+    **QA happy:** `make build && make up && make logs` succeeds and shows the provider loaded; then
+    `make down`. Evidence: `.omo/evidence/80-make-targets.log`.
+    **QA failure:** `make reset`, then assert `podman ps -a --format '{{.Names}}' | grep -c login-sync`
+    returns 0 and `test ! -d target` exits 0, proving the reset is complete. Evidence: `.omo/evidence/80-make-reset.log`.
+    **Commit:** `chore: add Makefile for the local development loop`
 
 - [ ] 3. `README.md`: Configuration, Deployment and Limitations - expect all nine variables verbatim and every hazard documented
 
@@ -199,19 +199,19 @@ Todo 3 comes last so the documented Makefile targets and env names match what ex
     identifier and its timestamp is second-truncated, so delivery is **at-most-once**, the receiver
     **cannot deduplicate** on payload equality, and Keycloak-side and receiver-side log lines
     **cannot be reliably correlated** during an incident.
-  **Acceptance criteria:** `markdownlint-cli2 README.md` exits 0.
-  `grep -c 'KC_SPI_AUTHENTICATOR__LOGIN_SYNC__' README.md` returns >= 9.
-  `grep -c 'KC_SPI_AUTHENTICATOR_LOGIN_SYNC_' README.md` returns 0.
-  Run `for s in 'after the forms subflow' 'never replayed' 'not a security control' 'no retry' 'REQUIRED' 'at-most-once' 'cannot deduplicate' 'per-node'; do grep -qF "$s" README.md || echo "MISSING $s"; done`
-  expecting **no output**. `grep -c 'token-strategy spike' README.md` returns 0.
-  `grep -ciE 'REGISTER is supported|UPDATE_PROFILE is supported' README.md` returns 0.
-  **QA happy:** `git add README.md && prek run markdownlint-cli2 --all-files` exits 0 and the
-  string loop prints nothing. The `git add` is mandatory - prek inspects only tracked files, so an
-  untracked broken README passes vacuously. Evidence: `.omo/evidence/80-readme-lint.log`.
-  **QA failure:** delete the "never replayed" sentence, re-run the loop, confirm it prints
-  `MISSING never replayed`; restore it, re-run, confirm no output and a clean
-  `git status --porcelain README.md`. Evidence: `.omo/evidence/80-readme-grep-fail.log`.
-  **Commit:** `docs: document configuration, deployment constraints and limitations`
+    **Acceptance criteria:** `markdownlint-cli2 README.md` exits 0.
+    `grep -c 'KC_SPI_AUTHENTICATOR__LOGIN_SYNC__' README.md` returns >= 9.
+    `grep -c 'KC_SPI_AUTHENTICATOR_LOGIN_SYNC_' README.md` returns 0.
+    Run `for s in 'after the forms subflow' 'never replayed' 'not a security control' 'no retry' 'REQUIRED' 'at-most-once' 'cannot deduplicate' 'per-node'; do grep -qF "$s" README.md || echo "MISSING $s"; done`
+    expecting **no output**. `grep -c 'token-strategy spike' README.md` returns 0.
+    `grep -ciE 'REGISTER is supported|UPDATE_PROFILE is supported' README.md` returns 0.
+    **QA happy:** `git add README.md && prek run markdownlint-cli2 --all-files` exits 0 and the
+    string loop prints nothing. The `git add` is mandatory - prek inspects only tracked files, so an
+    untracked broken README passes vacuously. Evidence: `.omo/evidence/80-readme-lint.log`.
+    **QA failure:** delete the "never replayed" sentence, re-run the loop, confirm it prints
+    `MISSING never replayed`; restore it, re-run, confirm no output and a clean
+    `git status --porcelain README.md`. Evidence: `.omo/evidence/80-readme-grep-fail.log`.
+    **Commit:** `docs: document configuration, deployment constraints and limitations`
 
 ## Final verification wave
 

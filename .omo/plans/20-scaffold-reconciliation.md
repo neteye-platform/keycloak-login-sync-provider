@@ -7,11 +7,11 @@ wave: 0
 prerequisites: []
 parallel_with: [10-contract-reconciliation]
 owns_files:
-  - .github/workflows/release.yaml   # release-guard only, todo 1
+  - .github/workflows/release.yaml # release-guard only, todo 1
   - pom.xml
   - .gitignore
   - src/main/resources/.gitkeep
-  - README.md   # one stale line only; doc sections belong to plan 80
+  - README.md # one stale line only; doc sections belong to plan 80
 ```
 
 ## TL;DR (For humans)
@@ -67,14 +67,14 @@ action SHAs, licences, `SECURITY.md`, `scripts/test.sh` or any hygiene file. No 
 
 ## Key decisions
 
-| id | decision | rationale |
-|----|----------|-----------|
-| S0 | **Guard `release.yaml` before touching `pom.xml`** | a commit-body warning cannot stop a workflow; only code can. Publishing `v0.1.0` from an empty provider is irreversible in practice |
-| R3 | `provided` Jackson pinned to `2.21.2` | Keycloak 26.7.0 ships 2.21.2 via Quarkus 3.33.2.1; compiling against 2.22.1 can pass CI and fail at runtime with `NoSuchMethodError` |
-| S1 | Keep Mockito `5.12.0`, test scope | already resolves against JUnit Jupiter 6.1.2; plans 60/70 need it |
-| S2 | Keep explicit `${keycloak.version}` on all three Keycloak artifacts | `keycloak-spi-bom` manages only `keycloak-core` and `keycloak-server-spi` |
-| S3 | `.gitignore` gains `.omo/` and `.env`, and is owned **solely** by this plan | plan 80 needed `.env` ignored; centralising ownership prevents a two-plan conflict |
-| S4 | The Jackson rationale is inlined here, not cross-referenced to plan 10 | plan 10 runs in parallel, so its output cannot be a prerequisite of this plan |
+| id  | decision                                                                    | rationale                                                                                                                            |
+| --- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| S0  | **Guard `release.yaml` before touching `pom.xml`**                          | a commit-body warning cannot stop a workflow; only code can. Publishing `v0.1.0` from an empty provider is irreversible in practice  |
+| R3  | `provided` Jackson pinned to `2.21.2`                                       | Keycloak 26.7.0 ships 2.21.2 via Quarkus 3.33.2.1; compiling against 2.22.1 can pass CI and fail at runtime with `NoSuchMethodError` |
+| S1  | Keep Mockito `5.12.0`, test scope                                           | already resolves against JUnit Jupiter 6.1.2; plans 60/70 need it                                                                    |
+| S2  | Keep explicit `${keycloak.version}` on all three Keycloak artifacts         | `keycloak-spi-bom` manages only `keycloak-core` and `keycloak-server-spi`                                                            |
+| S3  | `.gitignore` gains `.omo/` and `.env`, and is owned **solely** by this plan | plan 80 needed `.env` ignored; centralising ownership prevents a two-plan conflict                                                   |
+| S4  | The Jackson rationale is inlined here, not cross-referenced to plan 10      | plan 10 runs in parallel, so its output cannot be a prerequisite of this plan                                                        |
 
 ---
 
@@ -94,11 +94,11 @@ lives under the gitignored `.omo/evidence/` and is excluded from tracked-file au
 
 ## Execution strategy
 
-| wave | todos | depends on |
-|------|-------|-----------|
-| 1 | 1 | - |
-| 2 | 2, 3 | 1 |
-| F | F1, F2 | 1, 2, 3 |
+| wave | todos  | depends on |
+| ---- | ------ | ---------- |
+| 1    | 1      | -          |
+| 2    | 2, 3   | 1          |
+| F    | F1, F2 | 1, 2, 3    |
 
 Todo 1 is a hard gate: **no commit touching `pom.xml` may be created or merged before it lands.**
 

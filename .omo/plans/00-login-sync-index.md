@@ -4,13 +4,13 @@
 slug: 00-login-sync-index
 kind: index
 intent: clear
-revision: 2   # revised after dual high-accuracy review (9 Momus lanes + Oracle)
+revision: 2 # revised after dual high-accuracy review (9 Momus lanes + Oracle)
 authority: N4-LLD-2.pdf (pages 1-14) + the revised decisions in 10-contract-reconciliation
 supersedes:
-  - .omo/plans/keycloak-login-sync-provider.md   # fully superseded, do not execute
+  - .omo/plans/keycloak-login-sync-provider.md # fully superseded, do not execute
 completed_and_not_replanned:
-  - .omo/plans/bootstrap-and-ci.md               # executed 2026-08-18, 5/5 + F1/F2
-  - .omo/plans/spike-token-strategy.md           # executed 2026-08-18, 3/3 + F1/F2
+  - .omo/plans/bootstrap-and-ci.md # executed 2026-08-18, 5/5 + F1/F2
+  - .omo/plans/spike-token-strategy.md # executed 2026-08-18, 3/3 + F1/F2
 ```
 
 ## TL;DR (For humans)
@@ -134,18 +134,18 @@ are executable scripts rather than prose confirmations.
 
 Revision 2 removed two false parallelism claims. The honest graph is:
 
-| wave | plan | parallel with | depends on |
-|------|------|---------------|-----------|
-| 0 | `10-contract-reconciliation` | `20` | - |
-| 0 | `20-scaffold-reconciliation` | `10` | - |
-| 1 | `30-config-and-payload` | none | 10, 20 |
-| 2 | `40-circuit-breaker` | none | 30 |
-| 3 | `50-token-and-sync-client` | none | 30, 40 |
-| 4 | `60-authenticator-spi` | none | 30, 40, 50 |
-| 5 | `70-integration-harness` | none | 60 |
-| 6 | `80-devstack-and-docs` | none | 70 |
+| wave | plan                         | parallel with | depends on |
+| ---- | ---------------------------- | ------------- | ---------- |
+| 0    | `10-contract-reconciliation` | `20`          | -          |
+| 0    | `20-scaffold-reconciliation` | `10`          | -          |
+| 1    | `30-config-and-payload`      | none          | 10, 20     |
+| 2    | `40-circuit-breaker`         | none          | 30         |
+| 3    | `50-token-and-sync-client`   | none          | 30, 40     |
+| 4    | `60-authenticator-spi`       | none          | 30, 40, 50 |
+| 5    | `70-integration-harness`     | none          | 60         |
+| 6    | `80-devstack-and-docs`       | none          | 70         |
 
-```
+```text
 10 ─┐
     ├─> 30 ─> 40 ─> 50 ─> 60 ─> 70 ─> 80
 20 ─┘
@@ -159,16 +159,16 @@ and neither compiles code.
 
 ### File-ownership matrix
 
-| plan | owns |
-|------|------|
-| 10 | `docs/DECISIONS.md`, `docs/SYNC-CONTRACT.md` |
-| 20 | `pom.xml`, `.gitignore`, `src/main/resources/.gitkeep`, one stale line of `README.md` |
-| 30 | `LoginSyncConstants`, `LoginSyncConfig`, `SyncPayload` + their tests |
-| 40 | `CircuitBreaker`, `CircuitState`, `Permit` + their tests |
-| 50 | `ServiceAccountTokenProvider`, `SyncClient`, `SyncOutcome`, `SyncFailedException`, `TokenHandle` + their tests |
-| 60 | `LoginSyncAuthenticator`, `LoginSyncAuthenticatorFactory`, `META-INF/services/...`, `theme-resources/messages/messages_en.properties` + test |
-| 70 | `src/test/java/.../support/*`, `LoginSyncIT` |
-| 80 | `podman-compose.yml`, `.env.example`, `Makefile`, `README.md` sections |
+| plan | owns                                                                                                                                         |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 10   | `docs/DECISIONS.md`, `docs/SYNC-CONTRACT.md`                                                                                                 |
+| 20   | `pom.xml`, `.gitignore`, `src/main/resources/.gitkeep`, one stale line of `README.md`                                                        |
+| 30   | `LoginSyncConstants`, `LoginSyncConfig`, `SyncPayload` + their tests                                                                         |
+| 40   | `CircuitBreaker`, `CircuitState`, `Permit` + their tests                                                                                     |
+| 50   | `ServiceAccountTokenProvider`, `SyncClient`, `SyncOutcome`, `SyncFailedException`, `TokenHandle` + their tests                               |
+| 60   | `LoginSyncAuthenticator`, `LoginSyncAuthenticatorFactory`, `META-INF/services/...`, `theme-resources/messages/messages_en.properties` + test |
+| 70   | `src/test/java/.../support/*`, `LoginSyncIT`                                                                                                 |
+| 80   | `podman-compose.yml`, `.env.example`, `Makefile`, `README.md` sections                                                                       |
 
 `.gitignore` is owned **solely by plan 20**, which adds both `.omo/` and `.env`; plan 80 must not
 edit it. `README.md` is touched by plans 20 and 80, six waves apart.

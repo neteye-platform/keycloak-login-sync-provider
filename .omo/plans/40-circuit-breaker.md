@@ -66,18 +66,18 @@ impossible to express.
 
 ## Key decisions
 
-| id | decision | rationale |
-|----|----------|-----------|
-| B1 | All state in ONE `AtomicReference` to an immutable record, mutated with `updateAndGet` | separate atomics can be read mid-update and yield an impossible combination |
-| B2 | `System.nanoTime()` via an injected time source | monotonic; `currentTimeMillis()` jumps under NTP correction and can strand the breaker OPEN or release it early |
-| B3 | Count-based window of the last `windowSize` outcomes | matches LLD 3.2's "sliding window: 20 requests" |
-| B4 | Error-rate trigger evaluated only on a **full** window | without it the first failure is 1/1 = 100% and trips instantly |
-| B5 | Exactly one settlement per **logical sync** | there is no retry, so this is trivially true today; stating it prevents a future change double-counting |
-| B6 | HALF_OPEN admits exactly one trial via CAS; losers take the OPEN path | a burst at cooldown expiry must not all hammer a still-broken receiver |
-| B7 | WARN only on the transition into OPEN with marker `LOGIN_SYNC_CIRCUIT_OPEN`; skips at DEBUG | user instruction deviating from LLD 3.2 - a per-skip WARN floods the log during the outage it describes |
-| **B8** | **`Permit` carries a generation and is settled exactly once via `complete(Outcome)`** | **review: global record methods let a stale outcome mutate a newer generation, and an unsettled permit leaks the HALF_OPEN slot forever** |
-| **B9** | **Settlement outcomes are `SUCCESS`, `FAILURE` and `ABANDONED`** | **`ABANDONED` releases the slot without recording a sample - required for bulkhead saturation, which must never count as a receiver failure (it would open the breaker on a healthy receiver under local load)** |
-| **B10** | **Settlement is idempotent; a second `complete()` on the same permit is a no-op, and a settlement whose generation no longer matches is discarded** | **prevents both double-counting and late/stale mutation of a newer breaker generation** |
+| id      | decision                                                                                                                                            | rationale                                                                                                                                                                                                        |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B1      | All state in ONE `AtomicReference` to an immutable record, mutated with `updateAndGet`                                                              | separate atomics can be read mid-update and yield an impossible combination                                                                                                                                      |
+| B2      | `System.nanoTime()` via an injected time source                                                                                                     | monotonic; `currentTimeMillis()` jumps under NTP correction and can strand the breaker OPEN or release it early                                                                                                  |
+| B3      | Count-based window of the last `windowSize` outcomes                                                                                                | matches LLD 3.2's "sliding window: 20 requests"                                                                                                                                                                  |
+| B4      | Error-rate trigger evaluated only on a **full** window                                                                                              | without it the first failure is 1/1 = 100% and trips instantly                                                                                                                                                   |
+| B5      | Exactly one settlement per **logical sync**                                                                                                         | there is no retry, so this is trivially true today; stating it prevents a future change double-counting                                                                                                          |
+| B6      | HALF_OPEN admits exactly one trial via CAS; losers take the OPEN path                                                                               | a burst at cooldown expiry must not all hammer a still-broken receiver                                                                                                                                           |
+| B7      | WARN only on the transition into OPEN with marker `LOGIN_SYNC_CIRCUIT_OPEN`; skips at DEBUG                                                         | user instruction deviating from LLD 3.2 - a per-skip WARN floods the log during the outage it describes                                                                                                          |
+| **B8**  | **`Permit` carries a generation and is settled exactly once via `complete(Outcome)`**                                                               | **review: global record methods let a stale outcome mutate a newer generation, and an unsettled permit leaks the HALF_OPEN slot forever**                                                                        |
+| **B9**  | **Settlement outcomes are `SUCCESS`, `FAILURE` and `ABANDONED`**                                                                                    | **`ABANDONED` releases the slot without recording a sample - required for bulkhead saturation, which must never count as a receiver failure (it would open the breaker on a healthy receiver under local load)** |
+| **B10** | **Settlement is idempotent; a second `complete()` on the same permit is a no-op, and a settlement whose generation no longer matches is discarded** | **prevents both double-counting and late/stale mutation of a newer breaker generation**                                                                                                                          |
 
 ---
 
@@ -99,11 +99,11 @@ Per portfolio invariant P1 every check names a command and an expected result; p
 
 ## Execution strategy
 
-| wave | todos | depends on |
-|------|-------|-----------|
-| 1 | 1 | - |
-| 2 | 2 | 1 |
-| F | F1, F2 | 1, 2 |
+| wave | todos  | depends on |
+| ---- | ------ | ---------- |
+| 1    | 1      | -          |
+| 2    | 2      | 1          |
+| F    | F1, F2 | 1, 2       |
 
 Todo 1 writes the failing specification; todo 2 makes it pass. Deliberately separate commits so a
 reviewer sees the specification before the implementation.
@@ -150,15 +150,15 @@ reviewer sees the specification before the implementation.
   - **Permit-leak regression:** acquire the sole trial permit, have the caller throw without
     settling, and assert that a `finally`-based settlement in the test harness still releases the
     slot - documenting that consumers must settle in `finally`.
-  **Acceptance criteria:** the test class compiles against `CircuitState`, `Permit` and a minimal
-  `CircuitBreaker` stub, and `scripts/test.sh test -Dtest=CircuitBreakerTest` **fails** with
-  assertion failures. Assert the failure output contains `AssertionError` or
-  `AssertionFailedError` and contains neither `NullPointerException` nor a compilation error - a
-  red suite must be red for the intended reason.
-  **QA happy:** the run fails with assertion errors on the transition tests. Evidence: `.omo/evidence/40-breaker-red.log`.
-  **QA failure:** `grep -cE 'NullPointerException|COMPILATION ERROR' .omo/evidence/40-breaker-red.log`
-  returns 0, proving the red is genuine. Evidence: `.omo/evidence/40-breaker-red-reason.log`.
-  **Commit:** `test: specify circuit breaker state machine and concurrency invariants`
+    **Acceptance criteria:** the test class compiles against `CircuitState`, `Permit` and a minimal
+    `CircuitBreaker` stub, and `scripts/test.sh test -Dtest=CircuitBreakerTest` **fails** with
+    assertion failures. Assert the failure output contains `AssertionError` or
+    `AssertionFailedError` and contains neither `NullPointerException` nor a compilation error - a
+    red suite must be red for the intended reason.
+    **QA happy:** the run fails with assertion errors on the transition tests. Evidence: `.omo/evidence/40-breaker-red.log`.
+    **QA failure:** `grep -cE 'NullPointerException|COMPILATION ERROR' .omo/evidence/40-breaker-red.log`
+    returns 0, proving the red is genuine. Evidence: `.omo/evidence/40-breaker-red-reason.log`.
+    **Commit:** `test: specify circuit breaker state machine and concurrency invariants`
 
 - [ ] 2. `CircuitBreaker.java`: implement until the specification passes - expect zero flakes over 20 runs and a faulty fixture that provably fails
 
@@ -189,16 +189,16 @@ reviewer sees the specification before the implementation.
   - Also add to the test sources a deterministic **faulty fixture**: a variant whose half-open CAS
     is replaced by an unconditional grant. It exists solely so the anti-vacuity assertion is
     repeatable and leaves the tree clean.
-  **Acceptance criteria:** `scripts/test.sh test -Dtest=CircuitBreakerTest` exits 0 with every
-  todo-1 case passing. `grep -rniE 'fail.?closed|fail.?open' src/main/java` yields matches only
-  inside comments, never identifiers. `grep -c 'currentTimeMillis' CircuitBreaker.java` returns 0.
-  `grep -c 'synchronized' CircuitBreaker.java` returns 0. Spotless AOSP passes.
-  **QA happy:** `scripts/test.sh test -Dtest=CircuitBreakerTest` exits 0. Evidence: `.omo/evidence/40-breaker-green.log`.
-  **QA failure:** (a) run the barrier-synchronised 64-thread test 20 consecutive times in a loop;
-  all 20 must pass with zero flakes. (b) Point the invariant test at the faulty fixture and assert
-  it **fails**, proving the assertion detects a broken CAS; the fixture is committed test code, so
-  no production source is edited and `git status --porcelain` stays clean. Evidence: `.omo/evidence/40-breaker-concurrency.log`.
-  **Commit:** `feat: add thread-safe circuit breaker with generation-bound permits`
+    **Acceptance criteria:** `scripts/test.sh test -Dtest=CircuitBreakerTest` exits 0 with every
+    todo-1 case passing. `grep -rniE 'fail.?closed|fail.?open' src/main/java` yields matches only
+    inside comments, never identifiers. `grep -c 'currentTimeMillis' CircuitBreaker.java` returns 0.
+    `grep -c 'synchronized' CircuitBreaker.java` returns 0. Spotless AOSP passes.
+    **QA happy:** `scripts/test.sh test -Dtest=CircuitBreakerTest` exits 0. Evidence: `.omo/evidence/40-breaker-green.log`.
+    **QA failure:** (a) run the barrier-synchronised 64-thread test 20 consecutive times in a loop;
+    all 20 must pass with zero flakes. (b) Point the invariant test at the faulty fixture and assert
+    it **fails**, proving the assertion detects a broken CAS; the fixture is committed test code, so
+    no production source is edited and `git status --porcelain` stays clean. Evidence: `.omo/evidence/40-breaker-concurrency.log`.
+    **Commit:** `feat: add thread-safe circuit breaker with generation-bound permits`
 
 ## Final verification wave
 
