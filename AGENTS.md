@@ -16,7 +16,7 @@ dev stack, or root `README.md` exists.
 
 ## Releases
 
-- The release workflow's `push` trigger remains commented until plan 0008
+- The release workflow's `push` trigger remains commented until plan 0007
   restores it; `workflow_dispatch` is active.
 - Each release workflow run resolves the POM version's `v<version>` Release. An
   existing Release is a no-op. When absent, it builds the POM version's jar,
@@ -28,7 +28,7 @@ dev stack, or root `README.md` exists.
 
 - [docs/plans/README.md](docs/plans/README.md) is the unnumbered portfolio
   landing page and shared planning guidance. Executable component plans are
-  `0001` through `0008`.
+  `0001` through `0007`.
 - Ignored `docs/evidence/` stores command output and observed results from a
   verification run. It demonstrates that named checks were executed, but is
   not tracked authority.

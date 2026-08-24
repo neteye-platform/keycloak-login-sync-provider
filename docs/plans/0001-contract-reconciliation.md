@@ -2,7 +2,7 @@
 
 ```yaml
 slug: 0001-contract-reconciliation
-revision: 4
+revision: 5
 wave: 0
 prerequisites: []
 parallel_with: [0002-scaffold-reconciliation]
@@ -18,7 +18,7 @@ whole portfolio: `docs/DECISIONS.md`, recording every place the LLD reverses the
 and `docs/SYNC-CONTRACT.md`, recording the external receiver contract the plugin depends on but
 does not implement.
 
-**Why this approach.** Six of the eight plans encode a decision the old plan got wrong. Writing
+**Why this approach.** Five of the seven plans encode a decision the old plan got wrong. Writing
 the reversals down once, with LLD references, stops each later plan re-litigating them and gives a
 reviewer one page to audit the whole reconciliation.
 
@@ -59,9 +59,8 @@ re-introduced by a later plan.
 | R1  | Config property is `service-endpoint`, env `KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SERVICE_ENDPOINT` | user decision; the only spelling with measured evidence                                          |
 | R2  | LLD 4.3.1 names it `endpoint`; that is **flagged for alignment**, not adopted                   | user instruction; document and implementation must be reconciled by the LLD owner                |
 | R3  | `provided` Jackson pinned to 2.21.2                                                             | matches what Keycloak 26.7.0 actually ships                                                      |
-| R4  | Circuit-breaker logging deviates from LLD 3.2                                                   | user instruction supersedes; recorded as an explicit deviation                                   |
-| R5  | D21 (reuse the user's JWT) is **closed as not viable**; D24 void                                | LLD 3.3 and the user decision select Client Credentials                                          |
-| R6  | Delivery semantics are **at-most-once, non-deduplicable, non-correlatable**                     | consequence of the LLD-fixed six-field payload; must be documented, not discovered in production |
+| R4  | D21 (reuse the user's JWT) is **closed as not viable**; D24 void                                | LLD 3.3 and the user decision select Client Credentials                                          |
+| R5  | Delivery semantics are **at-most-once, non-deduplicable, non-correlatable**                     | consequence of the LLD-fixed six-field payload; must be documented, not discovered in production |
 
 ---
 
@@ -88,13 +87,13 @@ before the first commit (portfolio invariant P3).
 
 ## Todos
 
-- [ ] 1. `docs/DECISIONS.md`: record the full LLD-vs-old-plan reconciliation - expect all 12 reversal rows present and greppable
+- [ ] 1. `docs/DECISIONS.md`: record the full LLD-vs-old-plan reconciliation - expect all 10 reversal rows present and greppable
 
-  **References:** `N4-LLD-2.pdf` sections 3.1, 3.2, 3.3, 3.6, 3.7, 4.3, 4.3.1, 4.4;
+  **References:** `LLD.pdf` sections 3.1, 3.2, 3.3, 3.6, 3.7, 4.3, 4.3.1, 4.4;
   Historical plans and spike evidence are absent from this repository and are not authority.
   **Details:** Create `docs/DECISIONS.md` as a table, one row per reversal, each stating the
   old-plan behaviour, the replacing LLD rule with its section number, and the resulting action.
-  Each row MUST begin with a stable identifier `R-01` .. `R-12` at the start of the row so the
+  Each row MUST begin with a stable identifier `R-01` .. `R-10` at the start of the row so the
   audit can grep for it deterministically. Required rows:
   - `R-01 Retry deleted.` LLD 3.7: no retry for unavailable/timeout, 5xx, or 4xx. Action: single
     attempt; the retryable/non-retryable exception split is replaced by one `SyncFailedException`.
@@ -109,15 +108,10 @@ before the first commit (portfolio invariant P3).
   - `R-06 Config mechanism.` LLD 4.3 note discards `System.getenv`; 4.3.1 adopts `Config.Scope`.
   - `R-07 Config key name.` Implementation uses `service-endpoint`; LLD 4.3.1 says `endpoint`.
     Mark the row `ACTION REQUIRED: LLD owner`.
-  - `R-08 Breaker logging deviation.` LLD 3.2 asks for a WARN per skipped sync; action is WARN
-    only on the transition into OPEN with marker `LOGIN_SYNC_CIRCUIT_OPEN`, skips at DEBUG.
-    Record the reason: a per-skip WARN floods the log during the very outage it describes.
-  - `R-09 Event loss.` Events skipped while OPEN are lost and never replayed; permitting logins
-    during an outage is an availability trade-off, not a security control.
-  - `R-10 Jackson pin.` `provided` Jackson to 2.21.2; established by completed baseline 0002.
-  - `R-11 Additions beyond the LLD.` The bulkhead, the truststore-derived `SSLContext`, and the
+  - `R-08 Jackson pin.` `provided` Jackson to 2.21.2; established by completed baseline 0002.
+  - `R-09 Additions beyond the LLD.` The bulkhead, the truststore-derived `SSLContext`, and the
     per-JVM singleton documentation, each with the failure it prevents.
-  - `R-12 Keycloak REQUIRED-flow contract.` Verified from Keycloak 26.7.0 source:
+  - `R-10 Keycloak REQUIRED-flow contract.` Verified from Keycloak 26.7.0 source:
     `AuthenticationProcessor.isSuccessful()` returns true only for `ExecutionStatus.SUCCESS`, so
     `context.attempted()` in a REQUIRED execution **fails the login**. Action: every deliberate
     skip calls `context.success()`. Also record that `requiresUser()==true` throws before
@@ -125,13 +119,13 @@ before the first commit (portfolio invariant P3).
     Keycloak rather than skipping.
     Close with a "Historical artifacts" note stating that prior plans and spike evidence are absent
     from this repository and must not be treated as authority.
-    **Acceptance criteria:** run `for i in $(seq -w 1 12); do grep -q "R-$i" docs/DECISIONS.md || echo "MISSING R-$i"; done`
+    **Acceptance criteria:** run `for i in $(seq -w 1 10); do grep -q "R-$i" docs/DECISIONS.md || echo "MISSING R-$i"; done`
     and expect **no output**. Run `grep -c 'ACTION REQUIRED: LLD owner' docs/DECISIONS.md` expecting
     `1`. Run `grep -q 'This is not a retry' docs/DECISIONS.md` expecting exit 0. Run
     `grep -q 'context.success()' docs/DECISIONS.md` expecting exit 0. Run
     `markdownlint-cli2 docs/DECISIONS.md` expecting exit 0.
     **QA happy:** `git add docs/DECISIONS.md && prek run markdownlint-cli2 --all-files` exits 0 and
-    the R-01..R-12 loop prints nothing. Evidence: `docs/evidence/0001-decisions-lint.log`.
+    the R-01..R-10 loop prints nothing. Evidence: `docs/evidence/0001-decisions-lint.log`.
     **QA failure:** delete the `R-07` row, re-run the loop, and confirm it prints exactly
     `MISSING R-07` and the check fails; restore the row, re-run, and confirm no output. Then confirm
     `git status --porcelain docs/` is clean. Evidence: `docs/evidence/0001-decisions-grep-fail.log`.
@@ -139,7 +133,7 @@ before the first commit (portfolio invariant P3).
 
 - [ ] 2. `docs/SYNC-CONTRACT.md`: document the external receiver contract and its delivery semantics - expect every undecided item flagged and the deduplication limit stated
 
-  **References:** `N4-LLD-2.pdf` sections 3.3, 3.4, 4.4, 5; decision R6.
+  **References:** `LLD.pdf` sections 3.3, 3.4, 4.4, 5; decision R5.
   **Details:** Create `docs/SYNC-CONTRACT.md` describing what the plugin sends and what it assumes
   of the receiver. Required content:
   - **Request.** `POST {service-endpoint}/api/sync-user`; headers
@@ -159,7 +153,7 @@ before the first commit (portfolio invariant P3).
     deployment. Note LLD Open point 3 (receiver ownership) is still open, and that
     `/api/sync-user` is provisional and isolated in `LoginSyncConstants.SYNC_USER_PATH`, which is
     why the project stays at `0.x`.
-  - **Delivery semantics (R6) - required, and easy to omit.** State explicitly that the payload
+  - **Delivery semantics (R5) - required, and easy to omit.** State explicitly that the payload
     carries **no event id, request id, correlation id or idempotency key**, and that `timestamp`
     is truncated to whole seconds. Therefore: two genuine logins by the same user to the same
     client within one second produce **byte-identical** bodies; the receiver **cannot** distinguish
@@ -183,7 +177,7 @@ before the first commit (portfolio invariant P3).
 
 ## Final verification wave
 
-- [ ] F1. Reconciliation completeness audit (executable). Run the `R-01..R-12` presence loop from todo 1 expecting no output; run `grep -cE 'section [0-9]' docs/DECISIONS.md` expecting at least 8, proving rows cite LLD sections; run `grep -q 'ACTION REQUIRED: LLD owner' docs/DECISIONS.md` expecting exit 0; run `grep -q 'context.success()' docs/DECISIONS.md` expecting exit 0. Record each command with its exit status. Evidence: `docs/evidence/0001-F1-reconciliation.md`.
+- [ ] F1. Reconciliation completeness audit (executable). Run the `R-01..R-10` presence loop from todo 1 expecting no output; run `grep -cE 'section [0-9]' docs/DECISIONS.md` expecting at least 8, proving rows cite LLD sections; run `grep -q 'ACTION REQUIRED: LLD owner' docs/DECISIONS.md` expecting exit 0; run `grep -q 'context.success()' docs/DECISIONS.md` expecting exit 0. Record each command with its exit status. Evidence: `docs/evidence/0001-F1-reconciliation.md`.
 
 - [ ] F2. Scope fidelity audit (executable). With `BASE_SHA` recorded per invariant P3, run `git diff --name-only $BASE_SHA..HEAD` and assert the output is exactly the two lines `docs/DECISIONS.md` and `docs/SYNC-CONTRACT.md` (evidence under `docs/evidence/` is gitignored per P2 and must not appear). Run `git diff --name-only $BASE_SHA..HEAD -- pom.xml docs/plans/README.md .gitignore .github src` expecting empty output. Run `grep -rniE 'resilience4j|okhttp|RequiredActionProvider|retryable' docs/` and assert every hit lies on a line also matching `-iE 'removed|out of scope|replaced|deleted'`. Evidence: `docs/evidence/0001-F2-scope.md`.
 
@@ -193,7 +187,7 @@ Two commits, both `docs:`. Neither touches `pom.xml`, so no release workflow can
 
 ## Success criteria
 
-1. All 12 reversals are recorded with LLD references and machine-checkable identifiers.
+1. All 10 reversals are recorded with LLD references and machine-checkable identifiers.
 2. The `endpoint` vs `service-endpoint` mismatch is flagged for the LLD owner.
 3. The receiver contract is documented as assumptions, with role/claim/audience marked undecided.
 4. At-most-once delivery, non-deduplicability and non-correlatability are stated explicitly.

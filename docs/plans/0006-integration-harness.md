@@ -1,10 +1,10 @@
-# 0007 - integration harness - Work Plan
+# 0006 - integration harness - Work Plan
 
 ```yaml
-slug: 0007-integration-harness
-revision: 3
-wave: 5
-prerequisites: [0006-authenticator-spi]
+slug: 0006-integration-harness
+revision: 4
+wave: 4
+prerequisites: [0005-authenticator-spi]
 parallel_with: []
 owns_files:
   - src/test/java/com/wuerthit/keycloak/authenticators/loginsync/support/MockSyncService.java
@@ -22,16 +22,16 @@ service-account token the plugin sends is one **Keycloak itself issued**, verifi
 container's JWKS.
 
 **Why revision 2 restructured the scenarios.** Both reviewers found revision 1's scenarios
-mutually contradictory. With `cb-failure-threshold=1`, scenario 2's HTTP 500 necessarily opens the
+mutually contradictory. With `cb-failure-threshold=1`, scenario 2's HTTP 500 necessarily opened the
 singleton breaker, so scenario 3 could not also receive a 401 and record "exactly one request" -
-it would be skipped while OPEN. Worse, "next login succeeds" cannot prove token invalidation,
-because an OPEN breaker produces exactly the same observable result **with no HTTP request at
-all**. Scenarios are now grouped into isolated fixtures with per-group breaker settings, and the
-401 proof asserts a second POST with a _different_ token rather than a bare login success.
+it would be skipped while OPEN. Scenarios are now grouped into isolated fixtures with per-group
+breaker settings, and the 401 proof asserts a second POST with a _different_ token rather than a
+bare login success.
 
-**Also added:** a production-defaults group (threshold 5, window 20). Revision 1 tested only the
-degenerate window-size-1 configuration, in which plan 0004's full-window guard is trivially
-satisfied - so a real bug at the shipped defaults could pass.
+**Why revision 4 removed the breaker scenarios.** The circuit breaker was removed from the
+portfolio (0001, plans 0003-0005). The sync is **fail-closed**: every sync failure blocks the
+login. The breaker-transition and production-defaults groups therefore no longer test any real
+behavior and are removed; the functional and token-invalidation groups remain.
 
 **What it will NOT do.** No mock token endpoint. No direct-grant shortcut. No receiver-side
 validation logic. No production code changes.
@@ -63,23 +63,22 @@ validation logic. No production code changes.
 - MUST NOT test REGISTER, UPDATE_PROFILE or the `registration` flow.
 - MUST NOT modify anything under `src/main/`, `pom.xml` or `.github/`.
 - MUST NOT introduce a second mock-syncservice implementation.
-- MUST NOT leave scenario ordering or breaker state implicit.
+- MUST NOT leave scenario ordering implicit.
 - MUST NOT print an `Authorization` header value into an assertion message or test report.
 
 ---
 
 ## Key decisions
 
-| id     | decision                                                                                                                                                                    | rationale                                                                                                                          |
-| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| I1     | Plain `GenericContainer`, `Wait.forHttp("/realms/master")` 200, 3-minute startup                                                                                            | the pattern already proven in `../keycloak-oidc-groups-mapper/.../GroupOIDCMapperIT.java`                                          |
-| I2     | Jar path from the `provider.jar` system property                                                                                                                            | already wired into Failsafe by the bootstrap plan                                                                                  |
-| I3     | The fixture creates the confidential client and service account at runtime                                                                                                  | the LLD forbids provisioning scripts in the repo but permits test fixtures                                                         |
-| I4     | One `MockSyncService` with a `main(String[])`                                                                                                                               | plan 0008's compose stack runs this same class, so the two cannot drift                                                            |
-| **I5** | **Scenarios are grouped into isolated nested classes, each with its own container or its own realm plus a fresh breaker, and each group declares its own breaker settings** | **review: a single shared singleton breaker made revision 1's scenarios contradict each other**                                    |
-| **I6** | **A production-defaults group (threshold 5, window 20, cooldown 30s) runs alongside the aggressive group**                                                                  | **review: window size 1 makes plan 0004's full-window guard trivially true, so the degenerate config alone could mask a real bug** |
-| **I7** | **The 401 proof asserts two POSTs carrying two _different_ tokens, not merely a later successful login**                                                                    | **review: an OPEN breaker yields a successful login with zero requests, so login success alone proves nothing about invalidation** |
-| **I8** | **`CapturedRequest.toString()` redacts `Authorization`, and no assertion message embeds a token**                                                                           | **review: a failing assertion would otherwise print a live bearer token into the Surefire report**                                 |
+| id     | decision                                                                                                                                                                    | rationale                                                                                                                           |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| I1     | Plain `GenericContainer`, `Wait.forHttp("/realms/master")` 200, 3-minute startup                                                                                            | the pattern already proven in `../keycloak-oidc-groups-mapper/.../GroupOIDCMapperIT.java`                                           |
+| I2     | Jar path from the `provider.jar` system property                                                                                                                            | already wired into Failsafe by the bootstrap plan                                                                                   |
+| I3     | The fixture creates the confidential client and service account at runtime                                                                                                  | the LLD forbids provisioning scripts in the repo but permits test fixtures                                                          |
+| I4     | One `MockSyncService` with a `main(String[])`                                                                                                                               | plan 0007's compose stack runs this same class, so the two cannot drift                                                             |
+| **I5** | **Scenarios are grouped into isolated nested classes, each in its own realm**                                                                                               | **review: a single shared realm made revision 1's scenarios interfere via shared client/flow state**                                |
+| **I6** | **The 401 proof asserts two POSTs carrying two _different_ tokens, not merely a later successful login**                                                                    | **review: login success alone proves nothing about invalidation, because the sync is fail-closed and a blocked login has no token** |
+| **I7** | **`CapturedRequest.toString()` redacts `Authorization`, and no assertion message embeds a token**                                                                           | **review: a failing assertion would otherwise print a live bearer token into the Surefire report**                                  |
 
 ---
 
@@ -91,8 +90,8 @@ Three classes of proof:
 
 1. **Functional** - the right payload reaches the receiver with a real Keycloak-issued bearer token
    that verifies against the container's JWKS.
-2. **Behavioural** - exactly one attempt per admitted failing sync, zero requests while OPEN, login
-   blocked when the breaker is closed, and full recovery.
+2. **Behavioural** - exactly one attempt per admitted failing sync, login blocked on failure
+   (fail-closed), and token invalidation proven across two logins.
 3. **Operational** - no secret in the logs or test reports, and Keycloak stays responsive under a
    black-holed receiver.
 
@@ -120,7 +119,7 @@ Todos 1 and 2 are independent test-support code; todo 3 consumes both.
 
   **References:** `../keycloak-oidc-groups-mapper/src/test/java/.../support/MockOidcProvider.java`
   for the in-JVM `com.sun.net.httpserver.HttpServer` pattern; `docs/SYNC-CONTRACT.md`;
-  decisions I4, I8.
+  decisions I4, I7.
   **Details:** An in-JVM HTTP server exposing exactly two paths:
   - `POST /api/sync-user` - the receiver, responding per the current mode.
   - `POST /__control` with body `{"mode":"..."}` - switches mode at runtime. Modes: `ok` (200),
@@ -129,22 +128,22 @@ Todos 1 and 2 are independent test-support code; todo 3 consumes both.
     It records every request into a thread-safe list of `CapturedRequest` (method, path, headers,
     body), with `reset()` for per-scenario isolation and accessors `port()`, `setMode()`,
     `requests()`.
-    **`CapturedRequest.toString()` MUST redact the `Authorization` header value** (I8), rendering
+    **`CapturedRequest.toString()` MUST redact the `Authorization` header value** (I7), rendering
     only its scheme and a fixed mask, so a failing assertion cannot print a live token into the
     Surefire report. Provide a separate explicit accessor for tests that genuinely need the raw
     token (scenario 1's JWKS check), and require those tests never to embed it in an assertion
     message.
     **It MUST NOT implement a token endpoint** or return anything resembling an `access_token`. Add
     a comment stating tokens come from the real Keycloak container per the LLD.
-    Expose `main(String[])` so plan 0008's compose stack runs this identical class (I4).
+    Expose `main(String[])` so plan 0007's compose stack runs this identical class (I4).
     **Acceptance criteria:** a self-test asserts switching to `http500` changes the response code
     from 200 to 500 without a restart; that a recorded request exposes headers and body; that
     `reset()` empties the log; and that `new CapturedRequest(...withAuthHeader("Bearer abc.def.ghi")).toString()`
     contains neither `abc.def.ghi` nor the substring `def`. `grep -cE 'access_token|"/token"' MockSyncService.java`
     returns 0.
-    **QA happy:** the self-test passes. Evidence: `docs/evidence/0007-mock-selftest.log`.
+    **QA happy:** the self-test passes. Evidence: `docs/evidence/0006-mock-selftest.log`.
     **QA failure:** add a scratch token endpoint to the mock; the `access_token` grep assertion must
-    fail; remove it, re-run, confirm 0 and a clean `git status --porcelain src/test`. Evidence: `docs/evidence/0007-mock-notoken.log`.
+    fail; remove it, re-run, confirm 0 and a clean `git status --porcelain src/test`. Evidence: `docs/evidence/0006-mock-notoken.log`.
     **Commit:** `test: add receiver-only mock syncservice with redacted request capture`
 
 - [ ] 2. `KeycloakAdminApi.java` + `BrowserLogin.java`: fixture and login driver - expect a real browser-flow login with distinguishable success and failure
@@ -171,15 +170,15 @@ Todos 1 and 2 are independent test-support code; todo 3 consumes both.
     `createConfidentialClientWithServiceAccount` returns a usable id and secret; `BrowserLogin`
     returns success-with-code for valid credentials and failure-with-body for a blocked login.
     `grep -c 'grant_type=password' BrowserLogin.java` returns 0.
-    **QA happy:** exercised by todo 3; compiles clean under Spotless. Evidence: `docs/evidence/0007-harness-compile.log`.
+    **QA happy:** exercised by todo 3; compiles clean under Spotless. Evidence: `docs/evidence/0006-harness-compile.log`.
     **QA failure:** the `grant_type=password` grep returns 0 for `BrowserLogin`, proving the driver
-    goes through the browser flow. Evidence: `docs/evidence/0007-harness-nodirectgrant.log`.
+    goes through the browser flow. Evidence: `docs/evidence/0006-harness-nodirectgrant.log`.
     **Commit:** `test: add Keycloak admin fixture and browser-flow login driver`
 
 - [ ] 3. `LoginSyncIT.java`: isolated scenario groups with real Keycloak-issued tokens - expect `verify` green twice consecutively
 
   **References:** todos 1 and 2; `GroupOIDCMapperIT.java` for the container pattern; decisions
-  I1, I2, I5, I6, I7.
+  I1, I2, I5, I6.
   **Container setup:** `GenericContainer` on
   `quay.io/keycloak/keycloak:` + `System.getProperty("keycloak.version")`; jar from
   `System.getProperty("provider.jar")` via `MountableFile.forHostPath` into
@@ -195,41 +194,28 @@ Todos 1 and 2 are independent test-support code; todo 3 consumes both.
   token endpoint; create a public login client; create a user with an email and a **nested** group
   membership; copy the browser flow, add `login-sync` as **REQUIRED positioned after the forms
   subflow**, and bind the copy as the realm's browser flow.
-  **Isolation (I5).** Organise as `@Nested` groups. **Each group gets its own container instance**
-  (or, where a container restart is too slow, its own realm plus a container restart between
-  groups), so no group inherits another's breaker state. Within a group, order is explicit via
-  `@TestMethodOrder`, and `mock.reset()` runs between scenarios. Every group documents in a comment
-  the breaker state it requires on entry.
-  **Group A - functional (breaker effectively disabled: threshold high, window 20):**
+  **Isolation (I5).** Organise as `@Nested` groups. **Each group gets its own realm**, so no group
+  inherits another's client/flow/secret state. Within a group, order is explicit via
+  `@TestMethodOrder`, and `mock.reset()` runs between scenarios.
+  **Group A - functional:**
   1. Mode `ok` - login succeeds; the captured body equals the exact six-field payload with the
      expected username, email, full **nested** group paths and `client_id`; the `Authorization`
      header is `Bearer`-prefixed; and the token **verifies against the container's JWKS** with a
-     future `exp` and the expected `iss`. Do not embed the token in any assertion message (I8).
+     future `exp` and the expected `iss`. Do not embed the token in any assertion message (I7).
   2. Mode `created` (201) - login succeeds.
   3. Mode `http500` - login blocked: HTTP 500, body contains the rendered `loginSyncFailed`
      message, no `code=` on the redirect, and **exactly one** request recorded.
   4. Mode `http400` - login blocked, **exactly one** request.
   5. Mode `timeout` - login blocked, **exactly one** request.
-     **Group B - token invalidation (I7) (breaker effectively disabled):**
+     **Group B - token invalidation (I6) and fail-closed:**
   6. Mode `ok`; perform login 1 and capture token T1. Rotate the service-account secret via the
      admin API and set mode `http401`; perform login 2 - assert it is **blocked** and that
-     **exactly one** request was made in that login, carrying T1. Restore the secret in the
-     plugin's configuration, set mode `ok`, and perform login 3 - assert a **second POST occurred**
-     carrying a token **T2 != T1**. This proves invalidation happened and the next login
-     re-fetched, which a bare "next login succeeded" cannot show, because an OPEN breaker yields a
-     successful login with zero requests.
-     **Group C - breaker transitions, aggressive (threshold 1, window 1, cooldown 1s, timeout 250ms):**
-  7. `http500` opens the breaker; assert the `LOGIN_SYNC_CIRCUIT_OPEN` marker appears **exactly
-     once** in `keycloak.getLogs()` for that transition.
-  8. While OPEN, a further login **succeeds** and records **zero** requests at the mock.
-  9. Mode `ok`, cooldown elapsed - the trial closes the circuit; a subsequent login syncs again.
-  10. Cooldown elapsed with the mock still failing - the trial fails, **exactly one** request is
-      recorded for that trial, and the circuit reopens.
-      **Group D - production defaults (I6) (threshold 5, window 20, cooldown 30s):**
-  11. With mode `http500`, perform four logins - assert the breaker is still CLOSED, each login is
-      blocked, and **each recorded exactly one** request. The fifth login opens the breaker. This
-      exercises the full-window/consecutive-threshold logic that window-size 1 trivially bypasses.
-      **Cross-cutting assertions:**
+     **exactly one** request was made in that login, carrying T1 (fail-closed: a token failure
+     blocks the login). Restore the secret in the plugin's configuration, set mode `ok`, and
+     perform login 3 - assert a **second POST occurred** carrying a token **T2 != T1**. This
+     proves invalidation happened and the next login re-fetched, which a bare "next login
+     succeeded" cannot show.
+     **Cross-cutting assertions:**
   - **Provider-loaded gate:** `listAuthenticatorProviders` contains `login-sync`. Run first; if it
     fails, every other result is meaningless.
   - **Log safety:** `keycloak.getLogs()` contains none of the service-account secret, the literal
@@ -240,18 +226,18 @@ Todos 1 and 2 are independent test-support code; todo 3 consumes both.
     `GET /realms/master` returns 200 within 2 seconds.
     **Acceptance criteria:** `scripts/test.sh clean verify` exits 0 with every group and every
     cross-cutting assertion passing.
-    **QA happy:** `scripts/test.sh clean verify` exits 0. Evidence: `docs/evidence/0007-it-verify.log`.
+    **QA happy:** `scripts/test.sh clean verify` exits 0. Evidence: `docs/evidence/0006-it-verify.log`.
     **QA failure:** (a) run the full suite twice consecutively; both green, proving isolation is real
     and not order luck. (b) Point the plugin at a fabricated static bearer string via a committed
     faulty fixture; scenario 1's JWKS verification must fail, proving that assertion is not vacuous;
-    restore and confirm green, with `git status --porcelain` clean. Evidence: `docs/evidence/0007-it-rerun.log`.
+    restore and confirm green, with `git status --porcelain` clean. Evidence: `docs/evidence/0006-it-rerun.log`.
     **Commit:** `test: add end-to-end browser-flow integration scenarios`
 
 ## Final verification wave
 
-- [ ] F1. Token-authenticity and flow-authenticity audit (executable). Run `scripts/test.sh clean verify` expecting exit 0. Assert scenario 1's JWKS verification exists and is non-vacuous by running the faulty-fixture variant and expecting failure. Run `grep -cE 'access_token|"/token"' MockSyncService.java` expecting 0. Run `grep -rc 'grant_type=password' src/test/java` expecting 0. Run `grep -c 'T2' LoginSyncIT.java` >= 1 and confirm the group-B assertion compares two distinct tokens. Evidence: `docs/evidence/0007-F1-token-authenticity.md`.
+- [ ] F1. Token-authenticity and flow-authenticity audit (executable). Run `scripts/test.sh clean verify` expecting exit 0. Assert scenario 1's JWKS verification exists and is non-vacuous by running the faulty-fixture variant and expecting failure. Run `grep -cE 'access_token|"/token"' MockSyncService.java` expecting 0. Run `grep -rc 'grant_type=password' src/test/java` expecting 0. Run `grep -c 'T2' LoginSyncIT.java` >= 1 and confirm the group-B assertion compares two distinct tokens. Evidence: `docs/evidence/0006-F1-token-authenticity.md`.
 
-- [ ] F2. Behaviour, isolation and log-safety audit (executable). Assert every admitted failing sync has an explicit exactly-one-request assertion: `grep -cE 'assert.*requests\(\).size\(\).*1|assertEquals\(1, .*requests' LoginSyncIT.java` >= 7 (scenarios 3, 4, 5, 6, 10 and the four group-D logins). Assert the OPEN scenario has an explicit zero-request assertion: `grep -cE 'assertEquals\(0, .*requests' LoginSyncIT.java` >= 1. Run the suite twice consecutively expecting both green. Run the log-safety scan and its matcher non-vacuity check. Run `grep -rc 'Bearer ' target/surefire-reports/ 2>/dev/null` expecting 0, proving no token reached a report. With `BASE_SHA` per P3, `git diff --name-only $BASE_SHA..HEAD` equals this plan's five owned files and includes nothing under `src/main`, `pom.xml` or `.github/`. Evidence: `docs/evidence/0007-F2-behaviour.md`.
+- [ ] F2. Behaviour, isolation and log-safety audit (executable). Assert every admitted failing sync has an explicit exactly-one-request assertion: `grep -cE 'assert.*requests\(\).size\(\).*1|assertEquals\(1, .*requests' LoginSyncIT.java` >= 5 (scenarios 3, 4, 5, 6 and the group-A blocked logins). Run the suite twice consecutively expecting both green. Run the log-safety scan and its matcher non-vacuity check. Run `grep -rc 'Bearer ' target/surefire-reports/ 2>/dev/null` expecting 0, proving no token reached a report. With `BASE_SHA` per P3, `git diff --name-only $BASE_SHA..HEAD` equals this plan's five owned files and includes nothing under `src/main`, `pom.xml` or `.github/`. Evidence: `docs/evidence/0006-F2-behaviour.md`.
 
 ## Commit strategy
 
@@ -261,8 +247,8 @@ Three commits, all `test:`. Nothing under `src/main/`, `pom.xml` or `.github/` i
 
 1. `scripts/test.sh clean verify` exits 0 from a clean tree, twice in a row.
 2. The plugin's bearer token is proven Keycloak-issued via JWKS verification.
-3. Every admitted failing sync records exactly one request; every OPEN skip records zero.
+3. Every admitted failing sync records exactly one request; a sync failure blocks the login
+   (fail-closed).
 4. Token invalidation is proven by two POSTs with two different tokens, not by a bare login.
-5. Breaker transitions are exercised at both aggressive and production-default settings.
-6. Keycloak stays responsive under a black-holed receiver with 20 concurrent logins.
-7. No secret, token, email or group path appears in container logs or Surefire reports.
+5. Keycloak stays responsive under a black-holed receiver with 20 concurrent logins.
+6. No secret, token, email or group path appears in container logs or Surefire reports.

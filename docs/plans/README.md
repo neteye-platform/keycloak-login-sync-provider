@@ -4,8 +4,8 @@
 slug: login-sync-plan-portfolio
 kind: index
 intent: clear
-revision: 7
-authority: N4-LLD-2.pdf (pages 1-14) + the revised decisions in 0001-contract-reconciliation.md
+revision: 8
+authority: LLD.pdf (pages 1-14) + the revised decisions in 0001-contract-reconciliation.md
 ```
 
 > This unnumbered README is the portfolio landing page and shared planning guidance. It is not an
@@ -14,27 +14,29 @@ authority: N4-LLD-2.pdf (pages 1-14) + the revised decisions in 0001-contract-re
 
 ## TL;DR (For humans)
 
-**What you'll get.** Eight small, independently reviewable component plans (`0001` through `0008`)
+**What you'll get.** Seven small, independently reviewable component plans (`0001` through `0007`)
 that deliver the Keycloak
 26.7.0 `login-sync` custom Authenticator: LOGIN-only, synchronous, single-attempt POST to an
-external syncservice, authenticated with a service-account JWT via OAuth2 Client Credentials,
-guarded by a hand-written circuit breaker.
+external syncservice, authenticated with a service-account JWT via OAuth2 Client Credentials.
+Because no retry policy applies on sync-service failure, the login is **fail-closed**: a receiver
+failure blocks the login rather than being permitted.
 
 **Why this ordering.** Revision 2 removed the portfolio's false parallelism. A dual high-accuracy
-review proved that plan 0004 consumes constants owned by plan 0003, and that plan 0008 cannot run
-at all without plan 0007's mock class. Both were declared parallel in revision 1. The chain is now
-almost entirely sequential, which is the honest shape of this work.
+review proved that plan 0003 consumes constants owned by plan 0002 and that plan 0007 cannot run
+at all without plan 0006's mock class. Both were declared parallel in earlier revisions. The chain
+is now almost entirely sequential, which is the honest shape of this work.
 
 **What it will NOT do.** No REGISTER, no UPDATE_PROFILE, no `RequiredActionProvider`, no retry or
-backoff, no user-token construction, no async/outbox delivery, no receiver-side code, no
-Dockerfile, no RPM spec.
+backoff, no circuit breaker, no user-token construction, no async/outbox delivery, no
+receiver-side code, no Dockerfile, no RPM spec.
 
-**Effort.** 8 plans, 7 waves, 19 implementation todos + 2 completed-baseline re-audits + 16
+**Effort.** 7 plans, 6 waves, 16 implementation todos + 2 completed-baseline re-audits + 14
 final-verification todos.
 
-**Risk.** Medium. The residual risks are concentrated in plans 0004, 0005 and 0006 - breaker permit
-settlement, the token-invalidation race, and the Keycloak REQUIRED-flow contract. All three were
-found by review and are now specified rather than left to the implementer.
+**Risk.** Medium. The residual risks are concentrated in plans 0004, 0005 and 0006 - the
+token-invalidation race, the fail-closed mapping from sync outcome to login verdict, and the
+Keycloak REQUIRED-flow contract. They were found by review and are now specified rather than left
+to the implementer.
 
 **Decisions.** Reconciliation table in
 [0001-contract-reconciliation.md](0001-contract-reconciliation.md). User-confirmed for this round:
@@ -48,7 +50,7 @@ than reuse of the logging-in user's JWT. Absent spike artifacts are not authorit
 
 ### In scope
 
-- Ordering, dependencies and file ownership of the eight component plans.
+- Ordering, dependencies and file ownership of the seven component plans.
 - Recording the portfolio-wide invariants every plan must satisfy.
 
 ### Out of scope (Must-NOT-Have)
@@ -60,7 +62,7 @@ than reuse of the logging-in user's JWT. Absent spike artifacts are not authorit
 
 ## Authority and precedence
 
-1. `N4-LLD-2.pdf` pages 1-14 is the highest authority.
+1. `LLD.pdf` pages 1-14 is the highest authority.
 2. The user's revised decisions override the LLD **only** where recorded in
    [0001-contract-reconciliation.md](0001-contract-reconciliation.md).
 3. Historical plans and spike evidence are absent from this repository and are not authority.
@@ -109,8 +111,8 @@ Every plan must satisfy all of these; each plan's F-wave verifies its own compli
   `BASE_SHA`; every non-regression diff is `git diff --name-only $BASE_SHA..HEAD`. No plan may use
   an undefined `<base>`.
 - **P4 - skip means success.** Any deliberate skip in the Authenticator calls `context.success()`.
-- **P5 - one settlement per login.** Exactly one breaker settlement per logical sync, on every
-  path including exceptions.
+- **P5 - fail-closed.** Any admitted sync failure blocks the login; only a successful or
+  non-blocking outcome permits it. There is no fail-open allowance.
 - **P6 - no retry.** One HTTP attempt per logical sync, proven by a request-counter assertion.
 - **P7 - repo-clean QA.** Every QA-failure step that mutates a file restores it and re-runs the
   check to prove the restoration, ending with a clean `git status` for tracked files.
@@ -147,7 +149,7 @@ git diff --check
 actionlint .github/workflows/*.yaml
 scripts/test.sh clean verify
 prek run markdownlint-cli2 --all-files
-test "$(rg --files docs/plans -g '[0-9][0-9][0-9][0-9]-*.md' | wc -l)" -eq 8
+test "$(rg --files docs/plans -g '[0-9][0-9][0-9][0-9]-*.md' | wc -l)" -eq 7
 git check-ignore -q docs/evidence/probe .env
 ```
 
@@ -155,7 +157,7 @@ git check-ignore -q docs/evidence/probe .env
 
 ## Execution Strategy
 
-The eight executable component-plan documents are deliberately sequential after the initial
+The seven executable component-plan documents are deliberately sequential after the initial
 parallel wave. Plan 0002 contains only completed-baseline re-audits.
 
 | wave | plan                                                            | parallel with | depends on             |
@@ -163,23 +165,21 @@ parallel wave. Plan 0002 contains only completed-baseline re-audits.
 | 0    | [0001-contract-reconciliation](0001-contract-reconciliation.md) | `0002`        | -                      |
 | 0    | [0002-scaffold-reconciliation](0002-scaffold-reconciliation.md) | `0001`        | completed baseline     |
 | 1    | [0003-config-and-payload](0003-config-and-payload.md)           | none          | `0001`, `0002`         |
-| 2    | [0004-circuit-breaker](0004-circuit-breaker.md)                 | none          | `0003`                 |
-| 3    | [0005-token-and-sync-client](0005-token-and-sync-client.md)     | none          | `0001`, `0003`, `0004` |
-| 4    | [0006-authenticator-spi](0006-authenticator-spi.md)             | none          | `0003`, `0004`, `0005` |
-| 5    | [0007-integration-harness](0007-integration-harness.md)         | none          | `0006`                 |
-| 6    | [0008-devstack-and-docs](0008-devstack-and-docs.md)             | none          | `0001`, `0006`, `0007` |
+| 2    | [0004-token-and-sync-client](0004-token-and-sync-client.md)     | none          | `0001`, `0003`         |
+| 3    | [0005-authenticator-spi](0005-authenticator-spi.md)             | none          | `0003`, `0004`         |
+| 4    | [0006-integration-harness](0006-integration-harness.md)         | none          | `0005`                 |
+| 5    | [0007-devstack-and-docs](0007-devstack-and-docs.md)             | none          | `0001`, `0005`, `0006` |
 
 ```text
-0001 -> 0003, 0005, 0008
+0001 -> 0003, 0004, 0007
 0002 -> 0003
-0003 -> 0004, 0005, 0006
-0004 -> 0005, 0006
-0005 -> 0006
-0006 -> 0007, 0008
-0007 -> 0008
+0003 -> 0004, 0005
+0004 -> 0005
+0005 -> 0006, 0007
+0006 -> 0007
 ```
 
-Plan 0004 consumes constants from plan 0003, and plan 0008 consumes plan 0007's mock class.
+Plan 0003 consumes constants from plan 0001, and plan 0007 consumes plan 0006's mock class.
 Those constraints leave only plans 0001 and 0002 parallel.
 
 ### File Ownership Matrix
@@ -189,18 +189,17 @@ Those constraints leave only plans 0001 and 0002 parallel.
 | 0001 | `docs/DECISIONS.md`, `docs/SYNC-CONTRACT.md`                            |
 | 0002 | `.github/workflows/release.yaml`, `pom.xml`, `.gitignore`               |
 | 0003 | `LoginSyncConstants`, `LoginSyncConfig`, `SyncPayload`, and their tests |
-| 0004 | `CircuitBreaker`, `CircuitState`, `Permit`, and their tests             |
-| 0005 | token provider, sync client, outcome types, and their tests             |
-| 0006 | Authenticator SPI classes, services, message bundle, and test           |
-| 0007 | test support classes and `LoginSyncIT`                                  |
-| 0008 | `podman-compose.yml`, `.env.example`, `Makefile`, and root `README.md`  |
+| 0004 | token provider, sync client, outcome types, and their tests             |
+| 0005 | Authenticator SPI classes, services, message bundle, and test           |
+| 0006 | test support classes and `LoginSyncIT`                                  |
+| 0007 | `podman-compose.yml`, `.env.example`, `Makefile`, and root `README.md`  |
 
 `docs/plans/README.md` is shared guidance, not a component-plan output. Root `README.md` does not
-exist in the current skeleton; only plan 0008 creates it. Plan 0002 alone owns `.gitignore`.
+exist in the current skeleton; only plan 0007 creates it. Plan 0002 alone owns `.gitignore`.
 
 ## Portfolio Success Criteria
 
-1. The eight numbered plans are independently executable with no interview context.
+1. The seven numbered plans are independently executable with no interview context.
 2. Plan front matter and this graph agree on every prerequisite and parallel relationship.
 3. Evidence is generated only under ignored `docs/evidence/`; unavailable artifacts are not cited.
 4. No owned file appears in two component plans.

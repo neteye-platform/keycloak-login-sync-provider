@@ -2,7 +2,7 @@
 
 ```yaml
 slug: 0003-config-and-payload
-revision: 3
+revision: 4
 wave: 1
 prerequisites: [0001-contract-reconciliation, 0002-scaffold-reconciliation]
 parallel_with: []
@@ -27,7 +27,6 @@ personal data may ever reach a log, and `event_type` must be structurally incapa
 anything but `LOGIN`.
 
 **What it will NOT do.** No HTTP, no token handling, no circuit breaker, no Keycloak SPI classes.
-
 **Effort.** 3 implementation todos, plus 2 final verification todos.
 
 **Risk.** Low-medium. The concentrated risk is the JSON wire format: record components cannot be
@@ -40,7 +39,7 @@ becomes `eventType`/`clientId`.
 
 ### In scope
 
-- `LoginSyncConstants`: provider id, provisional path, nine `Config.Scope` keys, all defaults.
+- `LoginSyncConstants`: provider id, provisional path, five `Config.Scope` keys, all defaults.
 - `LoginSyncConfig`: immutable record from `Config.Scope`, redacting `toString()`, strict
   validation.
 - `SyncPayload`: six-field record, structurally immutable `event_type`, redacting `toString()`.
@@ -69,9 +68,9 @@ becomes `eventType`/`clientId`.
 | C2  | Config key is `service-endpoint`                                                    | user decision R1; the only spelling with measured evidence                                                                                                                                                                                      |
 | C3  | Absent **required** config yields `configured() == false` and does not throw        | `init()` runs even when the provider is bound to no flow; throwing would brick unrelated installs on the same server                                                                                                                            |
 | C4  | Present-but-**malformed** config throws `IllegalStateException`                     | a typo'd timeout must fail loudly at startup rather than silently defaulting. Documented consequence: this aborts provider startup server-wide even when unbound - deliberate, because a malformed value is an operator error that must be seen |
-| C5  | Bulkhead limit is an internal constant, not a tenth env var                         | keeps the operator surface at the nine keys the LLD defines                                                                                                                                                                                     |
+| C5  | Bulkhead limit is an internal constant, not a sixth env var                         | keeps the operator surface at the five keys the LLD defines                                                                                                                                                                                     |
 | C6  | `groups` sorted before serialisation                                                | determinism for the exact-JSON assertion                                                                                                                                                                                                        |
-| C7  | **All numeric bounds are strictly positive**; error rate is 1..100                  | review found `0` was accepted: `cb-window-size=0` breaks the ring buffer and `cb-failure-threshold=0` has no coherent meaning. An error rate of 0 would trip on the first full window regardless of outcomes, so it is rejected too             |
+| C7  | **All numeric bounds are strictly positive**, and `http-timeout-ms` must be > 0     | review found `0` was accepted: `http-timeout-ms=0` has no coherent meaning. A typed timeout must be rejected too                                                                                                                                |
 | C8  | `SyncPayload` is built by a static factory with a **private canonical constructor** | review found a record's canonical constructor could otherwise accept a non-`LOGIN` event type; immutability must be structural, not documentary                                                                                                 |
 
 ---
@@ -105,24 +104,20 @@ Todo 1 lands first; todos 2 and 3 both read its constants.
 - [ ] 1. `LoginSyncConstants.java`: the single home for the provisional path and every default - expect `/api/sync-user` to appear exactly once in main
 
   **References:** `docs/SYNC-CONTRACT.md` (created by plan 0001, a hard prerequisite) for the
-  provisional-path rationale; `N4-LLD-2.pdf` sections 3.2 and 4.3.1 for defaults;
+  provisional-path rationale; `LLD.pdf` sections 3.2 and 4.3.1 for defaults;
   the user-confirmed spelling recorded by plan 0001.
   **Details:** A `final` class with a private constructor. It holds:
   - `PROVIDER_ID = "login-sync"`.
   - `SYNC_USER_PATH = "/api/sync-user"`, commented as a **provisional contract** per LLD Open
     point 3 and marked the single change point.
-  - The nine dashed keys exactly: `service-endpoint`, `sa-client-id`, `sa-client-secret`,
-    `sa-token-endpoint`, `http-timeout-ms`, `cb-failure-threshold`, `cb-error-rate-threshold`,
-    `cb-window-size`, `cb-cooldown-seconds`.
-  - Defaults: `DEFAULT_HTTP_TIMEOUT_MS = 5000`, `DEFAULT_CB_FAILURE_THRESHOLD = 5`,
-    `DEFAULT_CB_ERROR_RATE_THRESHOLD = 50`, `DEFAULT_CB_WINDOW_SIZE = 20`,
-    `DEFAULT_CB_COOLDOWN_SECONDS = 30`.
-  - `DEFAULT_MAX_CONCURRENT_SYNCS = 32` (plan 0005's bulkhead), commented as deliberately not
+  - The five dashed keys exactly: `service-endpoint`, `sa-client-id`, `sa-client-secret`,
+    `sa-token-endpoint`, `http-timeout-ms`.
+  - Defaults: `DEFAULT_HTTP_TIMEOUT_MS = 5000`.
+  - `DEFAULT_MAX_CONCURRENT_SYNCS = 32` (plan 0004's bulkhead), commented as deliberately not
     operator-facing (C5).
-  - `DEFAULT_TOKEN_TIMEOUT_MS = 5000` and `DEFAULT_CONNECT_TIMEOUT_MS = 2000` for plan 0005's
+  - `DEFAULT_TOKEN_TIMEOUT_MS = 5000` and `DEFAULT_CONNECT_TIMEOUT_MS = 2000` for plan 0004's
     bounded token fetch - review found the token call had no specified timeout at all.
   - `EVENT_TYPE_LOGIN = "LOGIN"` - the only event type emitted.
-  - `CIRCUIT_OPEN_LOG_MARKER = "LOGIN_SYNC_CIRCUIT_OPEN"` for plan 0004's WARN.
     Add a class comment naming the env convention verbatim - `service-endpoint` maps to
     `KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SERVICE_ENDPOINT` - and noting the double underscore is
     empirically required because the single-underscore form does not resolve.
@@ -142,22 +137,19 @@ Todo 1 lands first; todos 2 and 3 both read its constants.
   **References:** todo 1's constants; `org.keycloak.Config.Scope` (an interface, hence trivially
   mockable - the reason LLD 4.3 rejected `System.getenv`); decisions C3, C4, C7.
   **Details:** An immutable `record` with a static factory `from(Config.Scope scope)`. Read the
-  nine keys via the constants, never a string literal.
+  five keys via the constants, never a string literal.
   - Missing **required** values (`service-endpoint`, `sa-client-id`, `sa-client-secret`,
     `sa-token-endpoint`) produce `configured() == false`. Do **not** throw (C3).
   - Missing optional values fall back to the `DEFAULT_*` constants.
   - Present-but-malformed values throw `IllegalStateException` (C4): unparsable URL, non-numeric
-    number, or any violation of C7 - `http-timeout-ms`, `cb-failure-threshold`, `cb-window-size`
-    and `cb-cooldown-seconds` MUST be **strictly greater than zero**, and
-    `cb-error-rate-threshold` MUST be in the inclusive range **1..100**. Zero is invalid for all
-    of them; review found revision 1 rejected only negatives.
+    number, or any violation of C7 - `http-timeout-ms` MUST be **strictly greater than zero**. Zero
+    is invalid; review found revision 3 rejected only negatives.
   - **`toString()` MUST be overridden** to redact `saClientSecret` with a fixed mask that does not
     encode its length.
   - Javadoc MUST state the C4 consequence: a malformed value aborts provider startup for the whole
     server even when the provider is bound to no flow, and that this is deliberate.
     **Tests:** each of the five defaults applied when absent; **each** of `http-timeout-ms=0`,
-    `cb-failure-threshold=0`, `cb-window-size=0`, `cb-cooldown-seconds=0`,
-    `cb-error-rate-threshold=0` and `cb-error-rate-threshold=101` throws `IllegalStateException`;
+    and `http-timeout-ms=-1` throws `IllegalStateException`;
     each negative equivalent throws; an unparsable URL throws; absent required keys give
     `configured() == false` **without** throwing; `toString()` contains neither the secret nor any
     4-or-more-character substring of it; a fully-populated scope yields every field intact.
@@ -171,7 +163,7 @@ Todo 1 lands first; todos 2 and 3 both read its constants.
 
 - [ ] 3. `SyncPayload.java` + test: the byte-exact wire contract - expect exact JSON, structurally immutable LOGIN, and a redacted `toString()`
 
-  **References:** `N4-LLD-2.pdf` section 4.4; `docs/SYNC-CONTRACT.md` from plan 0001; todo 1's
+  **References:** `LLD.pdf` section 4.4; `docs/SYNC-CONTRACT.md` from plan 0001; todo 1's
   `EVENT_TYPE_LOGIN`; decisions C6, C8.
   **Details:** A `record` serialised by the `provided` Jackson to exactly six fields in this order:
   `event_type`, `client_id`, `username`, `email`, `groups`, `timestamp`.
@@ -209,7 +201,7 @@ Todo 1 lands first; todos 2 and 3 both read its constants.
 
 ## Final verification wave
 
-- [ ] F1. Contract audit (executable). Run `scripts/test.sh test -Dtest=SyncPayloadTest,LoginSyncConfigTest` expecting exit 0. Serialise a fixed payload in a test and assert `objectMapper.readTree(json).fieldNames()` equals exactly `[event_type, client_id, username, email, groups, timestamp]` - no extras, none missing. Assert via reflection that `SyncPayload` exposes no public constructor or static factory taking an event-type argument. Assert each default equals the LLD value by `grep -E 'DEFAULT_(HTTP_TIMEOUT_MS|CB_FAILURE_THRESHOLD|CB_ERROR_RATE_THRESHOLD|CB_WINDOW_SIZE|CB_COOLDOWN_SECONDS)' LoginSyncConstants.java` and comparing to `5000, 5, 50, 20, 30`. Evidence: `docs/evidence/0003-F1-contract.md`.
+- [ ] F1. Contract audit (executable). Run `scripts/test.sh test -Dtest=SyncPayloadTest,LoginSyncConfigTest` expecting exit 0. Serialise a fixed payload in a test and assert `objectMapper.readTree(json).fieldNames()` equals exactly `[event_type, client_id, username, email, groups, timestamp]` - no extras, none missing. Assert via reflection that `SyncPayload` exposes no public constructor or static factory taking an event-type argument. Assert the timeout default equals the LLD value by `grep -E 'DEFAULT_HTTP_TIMEOUT_MS' LoginSyncConstants.java` and comparing to `5000`. Evidence: `docs/evidence/0003-F1-contract.md`.
 
 - [ ] F2. Log-safety and scope audit (executable). Run `grep -rc 'System.getenv' src/main/java` expecting total 0. Run `grep -rciE 'retry|backoff|REGISTER|UPDATE_PROFILE|resilience4j' src/main/java` expecting total 0. Run the exactly-one `/api/sync-user` check from todo 1 expecting exit 0. Run a test that builds a config and a payload populated with sentinel values `SECRET_SENTINEL`, `email@sentinel.test` and `/GROUP_SENTINEL`, calls `toString()` on both, and asserts none of the three sentinels appears; then assert `grep -rc 'SECRET_SENTINEL' target/surefire-reports/` returns 0. With `BASE_SHA` per P3, run `git diff --name-only $BASE_SHA..HEAD` and assert the set equals this plan's five owned files. Evidence: `docs/evidence/0003-F2-logsafety.md`.
 
