@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  # push:
+  #   branches:
+  #     - "main"
+  #   paths:
+  #     - "pom.xml"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: maven
+
+      - name: Resolve release version
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          pom_version="$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)"
+          tag="v${pom_version}"
+          release_exists=false
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            release_exists=true
+          fi
+
+          {
+            printf 'pom_version=%s\n' "$pom_version"
+            printf 'tag=%s\n' "$tag"
+            printf 'release_exists=%s\n' "$release_exists"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Build
+        if: steps.release.outputs.release_exists == 'false'
+        env:
+          POM_VERSION: ${{ steps.release.outputs.pom_version }}
+        run: |
+          mvn -B clean package
+          test -f "target/keycloak-login-sync-provider-${POM_VERSION}.jar"
+
+      - name: Generate GitHub App token
+        if: steps.release.outputs.release_exists == 'false'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: generate-token
+        with:
+          app-id: ${{ vars.NETEYE_APP_ID }}
+          private-key: ${{ secrets.NETEYE_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Tag the release
+        if: steps.release.outputs.release_exists == 'false'
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --refs origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            exit 0
+          fi
+          git -c "http.https://github.com/.extraheader=" push \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:refs/tags/${TAG}"
+
+      - name: Create GitHub release
+        if: steps.release.outputs.release_exists == 'false'
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: ${{ steps.release.outputs.tag }}
+          generate_release_notes: true
+          files: target/keycloak-login-sync-provider-*.jar

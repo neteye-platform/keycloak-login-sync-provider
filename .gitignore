@@ -1,0 +1,8 @@
+.classpath
+.env
+.omo/
+.project
+.settings/
+bin/
+docs/evidence/
+target/
