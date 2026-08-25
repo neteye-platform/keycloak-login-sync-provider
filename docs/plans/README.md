@@ -150,7 +150,7 @@ actionlint .github/workflows/*.yaml
 scripts/test.sh clean verify
 prek run markdownlint-cli2 --all-files
 test "$(rg --files docs/plans -g '[0-9][0-9][0-9][0-9]-*.md' | wc -l)" -eq 7
-git check-ignore -q docs/evidence/probe .env
+git check-ignore -q docs/evidence/probe && git check-ignore -q .env
 ```
 
 ---
