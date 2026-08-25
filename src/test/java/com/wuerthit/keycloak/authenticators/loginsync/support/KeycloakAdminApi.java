@@ -44,6 +44,16 @@ public class KeycloakAdminApi {
         post("/admin/realms", Map.of("realm", realm, "enabled", true));
     }
 
+    public void createRealm(String realm, int accessTokenLifespan)
+            throws IOException, InterruptedException {
+        post(
+                "/admin/realms",
+                Map.of(
+                        "realm", realm,
+                        "enabled", true,
+                        "accessTokenLifespan", accessTokenLifespan));
+    }
+
     public void deleteRealm(String realm) throws IOException, InterruptedException {
         sendSuccessful("DELETE", realmPath(realm), null);
     }
@@ -55,6 +65,8 @@ public class KeycloakAdminApi {
         Map<String, Object> user = new LinkedHashMap<>();
         user.put("username", username);
         user.put("email", email);
+        user.put("firstName", "Integration");
+        user.put("lastName", "User");
         user.put("enabled", true);
         user.put("emailVerified", true);
         user.put("credentials", List.of(credential));
@@ -116,6 +128,12 @@ public class KeycloakAdminApi {
      */
     public ClientCredentials createConfidentialClientWithServiceAccount(
             String realm, String clientId) throws IOException, InterruptedException {
+        return createConfidentialClientWithServiceAccount(realm, clientId, null);
+    }
+
+    public ClientCredentials createConfidentialClientWithServiceAccount(
+            String realm, String clientId, String explicitSecret)
+            throws IOException, InterruptedException {
         Map<String, Object> client = new LinkedHashMap<>();
         client.put("clientId", clientId);
         client.put("enabled", true);
@@ -124,13 +142,23 @@ public class KeycloakAdminApi {
         client.put("serviceAccountsEnabled", true);
         client.put("standardFlowEnabled", false);
         client.put("directAccessGrantsEnabled", false);
+        if (explicitSecret != null) {
+            client.put("secret", explicitSecret);
+        }
 
         String id = postForId(realmPath(realm) + "/clients", client);
-        String secret =
-                requiredText(
-                        get(realmPath(realm) + "/clients/" + pathSegment(id) + "/client-secret"),
-                        "value",
-                        "client secret for " + clientId);
+        String secret = explicitSecret;
+        if (secret == null) {
+            secret =
+                    requiredText(
+                            get(
+                                    realmPath(realm)
+                                            + "/clients/"
+                                            + pathSegment(id)
+                                            + "/client-secret"),
+                            "value",
+                            "client secret for " + clientId);
+        }
         return new ClientCredentials(clientId, secret);
     }
 
@@ -179,6 +207,15 @@ public class KeycloakAdminApi {
         return requiredText(credential, "value", "rotated secret for " + clientId);
     }
 
+    public void setClientSecret(String realm, String clientId, String secret)
+            throws IOException, InterruptedException {
+        String clientUuid = requireClientUuid(realm, clientId);
+        String path = realmPath(realm) + "/clients/" + pathSegment(clientUuid);
+        ObjectNode representation = (ObjectNode) get(path);
+        representation.put("secret", secret);
+        put(path, representation);
+    }
+
     public void copyFlow(String realm, String flowAlias, String newName)
             throws IOException, InterruptedException {
         post(
@@ -223,6 +260,24 @@ public class KeycloakAdminApi {
                                                         + "' in flow "
                                                         + flowAlias));
         execution.put("requirement", requirement);
+        put(executionsPath(realm, flowAlias), execution);
+    }
+
+    public void updateExecutionPriority(
+            String realm, String flowAlias, String provider, int priority)
+            throws IOException, InterruptedException {
+        ObjectNode execution =
+                authenticationExecutions(realm, flowAlias).stream()
+                        .filter(candidate -> executionMatches(candidate, provider))
+                        .findFirst()
+                        .orElseThrow(
+                                () ->
+                                        new IOException(
+                                                "No execution for provider or display name '"
+                                                        + provider
+                                                        + "' in flow "
+                                                        + flowAlias));
+        execution.put("priority", priority);
         put(executionsPath(realm, flowAlias), execution);
     }
 
