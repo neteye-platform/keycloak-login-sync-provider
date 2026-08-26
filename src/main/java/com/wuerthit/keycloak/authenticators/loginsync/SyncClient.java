@@ -84,7 +84,7 @@ public class SyncClient implements AutoCloseable {
         }
 
         if (!semaphore.tryAcquire()) {
-            return SyncOutcome.SKIPPED_SATURATED;
+            return SyncOutcome.SATURATED;
         }
 
         try {

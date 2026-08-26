@@ -37,8 +37,8 @@ public enum SyncOutcome {
     /** The service-account token endpoint could not supply a token. */
     TOKEN_UNAVAILABLE(true),
 
-    /** The bulkhead was saturated, so no HTTP call was made at all. */
-    SKIPPED_SATURATED(false);
+    /** The bulkhead was saturated, so the login is blocked without making an HTTP call. */
+    SATURATED(true);
 
     private final boolean blocksLogin;
 
@@ -49,8 +49,8 @@ public enum SyncOutcome {
     /**
      * Whether this outcome must block the login.
      *
-     * <p>Consumed by the Authenticator in plan 0005. A deliberate skip does not block; every
-     * admitted failure does.
+     * <p>Consumed by the Authenticator in plan 0005. Every synchronization failure blocks; only a
+     * successful synchronization permits the login.
      *
      * @return {@code true} when the login must fail because of this outcome
      */

@@ -61,7 +61,7 @@ class SyncClientTest {
         expected.put(SyncOutcome.TIMEOUT, true);
         expected.put(SyncOutcome.TRANSPORT_ERROR, true);
         expected.put(SyncOutcome.TOKEN_UNAVAILABLE, true);
-        expected.put(SyncOutcome.SKIPPED_SATURATED, false);
+        expected.put(SyncOutcome.SATURATED, true);
 
         assertEquals(8, SyncOutcome.values().length);
         assertEquals(EnumSet.allOf(SyncOutcome.class), expected.keySet());
@@ -201,7 +201,7 @@ class SyncClientTest {
     }
 
     @Test
-    void skipsSaturatedBulkheadWithoutHttpCall() throws Exception {
+    void blocksTheLoginWhenBulkheadIsSaturatedRegardless() throws Exception {
         AtomicInteger requestCount = new AtomicInteger();
         startSyncServer(requestCount, new StubResponse(200, 0));
         StubTokenProvider tokenProvider =
@@ -211,9 +211,10 @@ class SyncClientTest {
 
         SyncOutcome outcome = client.send(payload());
 
-        assertSame(SyncOutcome.SKIPPED_SATURATED, outcome);
+        assertSame(SyncOutcome.SATURATED, outcome);
         assertRequestCount(requestCount, 0);
         assertEquals(1, tokenProvider.acquisitionCount());
+        assertTrue(outcome.blocksLogin());
     }
 
     @Test

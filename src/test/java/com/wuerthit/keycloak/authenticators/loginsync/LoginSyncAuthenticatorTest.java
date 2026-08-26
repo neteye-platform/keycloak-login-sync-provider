@@ -125,7 +125,8 @@ class LoginSyncAuthenticatorTest {
                 "SERVER_ERROR",
                 "TIMEOUT",
                 "TRANSPORT_ERROR",
-                "TOKEN_UNAVAILABLE"
+                "TOKEN_UNAVAILABLE",
+                "SATURATED"
             })
     void failClosedBlocksTheLoginForEveryBlockingOutcome(SyncOutcome outcome) {
         assertTrue(outcome.blocksLogin());
@@ -140,7 +141,7 @@ class LoginSyncAuthenticatorTest {
     @ParameterizedTest
     @EnumSource(
             value = SyncOutcome.class,
-            names = {"SUCCESS", "SKIPPED_SATURATED"})
+            names = {"SUCCESS"})
     void failClosedStillPermitsTheLoginForEveryNonBlockingOutcome(SyncOutcome outcome) {
         givenFlow("authenticate", user("jdoe@example.com"));
         when(syncClient.send(any())).thenReturn(outcome);
