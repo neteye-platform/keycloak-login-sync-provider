@@ -103,15 +103,12 @@ Deploy the built JAR into `/opt/keycloak/providers`.
 
 ## Releasing
 
-The release workflow resolves the POM version's `v<version>` Release. An
-existing Release is a no-op. When absent, the workflow builds the POM version's
-JAR, retains an existing tag or creates an absent one, and then creates the
-Release.
-
-The `workflow_dispatch` trigger is active, while the `push` trigger is
-currently commented out. Do not change release triggers, pinned action
-revisions, artifact naming, or token permissions without an explicit
-release-workflow change.
+To release, update `<version>` in `pom.xml` and merge the change to `main`. The
+workflow reads that version. If a GitHub Release for `vX.Y.Z` already exists,
+the workflow does nothing. Otherwise it builds the jar, retains an existing tag
+or creates a missing one, then creates the GitHub Release.
+Keycloak itself is pinned by the `keycloak.version` property, which drives both
+the compile dependencies and the container image the tests run against.
 
 ## License
 
