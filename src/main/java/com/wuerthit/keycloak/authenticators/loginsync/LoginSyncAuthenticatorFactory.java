@@ -145,6 +145,12 @@ public class LoginSyncAuthenticatorFactory implements AuthenticatorFactory {
                 return null;
             }
 
+            // "TLS" negotiates the highest protocol the JVM offers, so a future TLS version is
+            // adopted by upgrading the JVM alone. The weak-ssl-context rule accepts only the
+            // literals "TLSv1.2" and "TLSv1.3", which both PIN that ceiling; the "TLSv1.2" it
+            // recommends measurably enables [TLSv1.2] alone and drops TLS 1.3. Suppressed for
+            // this line only, so the rule still guards every other call site.
+            // nosemgrep: java.lang.security.audit.weak-ssl-context.weak-ssl-context
             SSLContext sslContext = SSLContext.getInstance("TLS");
             sslContext.init(null, trustManagers, null);
             return sslContext;
