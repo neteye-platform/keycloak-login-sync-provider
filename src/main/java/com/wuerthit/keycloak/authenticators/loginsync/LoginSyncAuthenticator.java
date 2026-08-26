@@ -64,8 +64,10 @@ public class LoginSyncAuthenticator implements Authenticator {
     public void authenticate(AuthenticationFlowContext context) {
         if (config == null || !config.configured() || syncClient == null) {
             // A5: the login must not be blocked because an operator has not configured this
-            // provider yet, so the skip is a success rather than a failed execution.
-            LOG.error("Login sync is unconfigured; skipping the login synchronization");
+            // provider yet, so the skip is a success rather than a failed execution. The
+            // operator-facing ERROR is emitted once by the factory at init, naming the missing
+            // keys; emitting it here would repeat it on every single authentication.
+            LOG.debug("Login sync is unconfigured; skipping the login synchronization");
             context.success();
             return;
         }
