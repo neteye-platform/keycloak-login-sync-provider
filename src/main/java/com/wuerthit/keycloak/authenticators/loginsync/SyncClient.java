@@ -8,6 +8,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
@@ -42,7 +43,7 @@ public class SyncClient implements AutoCloseable {
                 objectMapper,
                 truststoreSslContext,
                 LoginSyncConstants.DEFAULT_MAX_CONCURRENT_SYNCS,
-                new ServiceAccountTokenProvider(config));
+                new ServiceAccountTokenProvider(config, Clock.systemUTC(), truststoreSslContext));
     }
 
     SyncClient(
