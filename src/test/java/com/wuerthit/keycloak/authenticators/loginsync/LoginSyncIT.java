@@ -76,6 +76,7 @@ class LoginSyncIT {
     private static final String LOGIN_SYNC_FAILED =
             "We could not complete your sign-in. Please try again later.";
     private static final String FLOW_ALIAS = "browser-with-login-sync";
+    private static final String SYNC_PATH = "/api/sync-user";
 
     private GenericContainer<?> keycloak;
     private MockSyncService mock;
@@ -95,7 +96,7 @@ class LoginSyncIT {
                         + providerJar
                         + "; run `scripts/test.sh verify`, not `scripts/test.sh test`");
 
-        String serviceEndpoint = "http://host.testcontainers.internal:" + mock.port();
+        String serviceEndpoint = "http://host.testcontainers.internal:" + mock.port() + SYNC_PATH;
         keycloak =
                 new GenericContainer<>(
                                 "quay.io/keycloak/keycloak:"

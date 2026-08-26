@@ -12,6 +12,8 @@ import org.keycloak.Config;
  * installs on the same server. A malformed value aborts provider startup for the whole server even
  * when the provider is bound to no flow, and this is deliberate, because a malformed value is an
  * operator error that must be seen.
+ *
+ * @param serviceEndpoint the complete receiver URL, including its path
  */
 public record LoginSyncConfig(
         String serviceEndpoint,

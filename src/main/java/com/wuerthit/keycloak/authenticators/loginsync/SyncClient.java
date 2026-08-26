@@ -56,7 +56,7 @@ public class SyncClient implements AutoCloseable {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
         this.tokenProvider = Objects.requireNonNull(tokenProvider, "tokenProvider");
         semaphore = new Semaphore(permitCount);
-        targetUri = URI.create(config.serviceEndpoint() + LoginSyncConstants.SYNC_USER_PATH);
+        targetUri = URI.create(config.serviceEndpoint());
         SSLContext sslContext = truststoreSslContext;
         if (sslContext == null) {
             try {

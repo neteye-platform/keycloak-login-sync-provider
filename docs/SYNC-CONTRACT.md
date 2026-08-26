@@ -13,14 +13,19 @@ Authority: `LLD.pdf` sections 3.3, 3.4, 4.4 and 5, plus decision R5 in
 The plugin performs a single HTTP call per logical sync:
 
 ```text
-POST {service-endpoint}/api/sync-user
+POST {service-endpoint}
 Authorization: Bearer <service-account-jwt>
 Content-Type: application/json
 ```
 
-`{service-endpoint}` is the configured base URL. The config property is `service-endpoint`
-(env `KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SERVICE_ENDPOINT`). LLD 4.3.1 spells the same property
-`endpoint`; that difference is flagged for alignment by the LLD owner, not adopted here.
+`{service-endpoint}` is the configured complete receiver URL, including its path (for example
+`http://receiver:8081/api/sync-user`). The config property is `service-endpoint` (env
+`KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SERVICE_ENDPOINT`). LLD 4.3.1 spells the same property
+`endpoint`; that difference is flagged for alignment by the LLD owner, not adopted here. The
+provider posts to this URL verbatim, consistently with the complete `sa-token-endpoint` URL.
+
+Upgrading from an earlier version is a breaking configuration change: an existing base-only URL
+must be updated to include the receiver path, or the provider will post to that base URL instead.
 
 The bearer token authenticates the **technical caller**. It is a service-account JWT obtained
 through OAuth2 Client Credentials. It is deliberately **not the logging-in user's** token, and
@@ -92,9 +97,10 @@ validates it on the receiver's behalf.
 - The audience value is `NOT decided` and must be finalized before a real deployment.
 - LLD Open point 3, ownership of the receiver, is still open. Until an owner exists, no counterpart
   can agree to a contract revision.
-- The path `/api/sync-user` is provisional. It is isolated in the single constant
-  `LoginSyncConstants.SYNC_USER_PATH` so a later change touches one line. That provisional path,
-  together with the undecided items above, is why the project stays at `0.x`.
+- `/api/sync-user` is the default/reference receiver path documented here, not a provider-owned
+  constant. An operator may configure any path through the complete `service-endpoint` URL. The
+  undecided ownership and authorization items above, rather than this configurable path, are why
+  the project stays at `0.x`.
 
 ## Delivery semantics (decision R5)
 

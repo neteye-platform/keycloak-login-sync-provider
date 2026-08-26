@@ -39,8 +39,8 @@ segments is required; the form with one underscore does not resolve. Plain
 `start-dev` resolves these settings, so a separate `kc.sh build` is not needed.
 
 - `KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SERVICE_ENDPOINT`
-  Scope key `service-endpoint`. Required, no default. Base URL of the receiver;
-  the plugin appends `/api/sync-user`.
+  Scope key `service-endpoint`. Required, no default. Complete receiver URL,
+  including the path (for example `http://receiver:8081/api/sync-user`).
 - `KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SA_CLIENT_ID`
   Scope key `sa-client-id`. Required, no default.
 - `KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SA_CLIENT_SECRET`
@@ -54,6 +54,10 @@ A missing required value degrades the provider to a no-op that permits logins.
 A malformed URL or a non-numeric or non-positive timeout deliberately aborts
 provider startup with an `IllegalStateException`. The bulkhead limit and token
 timeouts are internal constants and are deliberately not operator-facing.
+
+Upgrading from an earlier version is a breaking configuration change: append
+the receiver path to an existing base-only `service-endpoint`. The provider now
+posts to the configured URL verbatim, consistently with `sa-token-endpoint`.
 
 ## Deployment
 
@@ -86,7 +90,8 @@ Deploy the built JAR into `/opt/keycloak/providers`.
 - Synchronization is fail-closed: a receiver failure blocks the login. This is
   an availability trade-off and not a security control.
 - Only LOGIN is supported. REGISTER and UPDATE_PROFILE are out of scope.
-- `/api/sync-user` is provisional, which is why the version remains `0.x`.
+- The receiver ownership, authorization details, and wider integration contract
+  remain undecided, so the version remains `0.x`.
 - The payload has no event, request, correlation, or idempotency identifier.
   Its timestamp is truncated to seconds, so delivery is at-most-once. The
   receiver cannot deduplicate on payload equality, and Keycloak-side and
