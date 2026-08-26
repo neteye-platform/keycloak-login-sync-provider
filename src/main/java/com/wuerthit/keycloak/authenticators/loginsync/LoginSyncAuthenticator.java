@@ -143,8 +143,13 @@ public class LoginSyncAuthenticator implements Authenticator {
         } catch (SyncFailedException exception) {
             return exception.outcome() == null ? SyncOutcome.TRANSPORT_ERROR : exception.outcome();
         } catch (RuntimeException exception) {
-            // The message is redacted by construction: it names no payload field.
-            LOG.warn("Login sync failed with an unexpected error", exception);
+            // Only the exception TYPE is reported. Its message is not: an arbitrary
+            // RuntimeException raised below this call can carry payload content in its message
+            // (a serialization failure naming a field value, for one), and logging it would
+            // breach "never the payload body, email or group path" for this path.
+            LOG.warnf(
+                    "Login sync failed with an unexpected error of type %s",
+                    exception.getClass().getName());
             return SyncOutcome.TRANSPORT_ERROR;
         }
     }
