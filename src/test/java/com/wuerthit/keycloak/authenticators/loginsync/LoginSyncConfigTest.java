@@ -83,6 +83,52 @@ class LoginSyncConfigTest {
     }
 
     @Test
+    void rejectsHttpServiceEndpointByDefault() {
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                        LoginSyncConfig.from(
+                                scope(
+                                        Map.of(
+                                                LoginSyncConstants.CONFIG_SERVICE_ENDPOINT,
+                                                "http://sync.example.test"))));
+    }
+
+    @Test
+    void rejectsHttpTokenEndpointByDefault() {
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                        LoginSyncConfig.from(
+                                scope(
+                                        Map.of(
+                                                LoginSyncConstants.CONFIG_SA_TOKEN_ENDPOINT,
+                                                "http://identity.example.test/token"))));
+    }
+
+    @Test
+    void permitsHttpEndpointsWhenInsecureHttpIsEnabled() {
+        Map<String, String> values = new HashMap<>();
+        values.put(LoginSyncConstants.CONFIG_SERVICE_ENDPOINT, "http://sync.example.test");
+        values.put(LoginSyncConstants.CONFIG_SA_CLIENT_ID, CLIENT_ID);
+        values.put(LoginSyncConstants.CONFIG_SA_CLIENT_SECRET, "long-secret-value");
+        values.put(
+                LoginSyncConstants.CONFIG_SA_TOKEN_ENDPOINT, "http://identity.example.test/token");
+        values.put(LoginSyncConstants.CONFIG_ALLOW_INSECURE_HTTP, "true");
+
+        assertDoesNotThrow(() -> LoginSyncConfig.from(scope(values)));
+    }
+
+    @Test
+    void stillRejectsHttpWhenInsecureHttpIsExplicitlyFalse() {
+        Map<String, String> values = new HashMap<>();
+        values.put(LoginSyncConstants.CONFIG_SERVICE_ENDPOINT, "http://sync.example.test");
+        values.put(LoginSyncConstants.CONFIG_ALLOW_INSECURE_HTTP, "false");
+
+        assertThrows(IllegalStateException.class, () -> LoginSyncConfig.from(scope(values)));
+    }
+
+    @Test
     void isUnconfiguredWhenAllRequiredValuesAreAbsent() {
         LoginSyncConfig config = assertDoesNotThrow(() -> LoginSyncConfig.from(scope(Map.of())));
 

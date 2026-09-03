@@ -8,6 +8,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
@@ -42,7 +43,7 @@ public class SyncClient implements AutoCloseable {
                 objectMapper,
                 truststoreSslContext,
                 LoginSyncConstants.DEFAULT_MAX_CONCURRENT_SYNCS,
-                new ServiceAccountTokenProvider(config));
+                new ServiceAccountTokenProvider(config, Clock.systemUTC(), truststoreSslContext));
     }
 
     SyncClient(
@@ -55,7 +56,7 @@ public class SyncClient implements AutoCloseable {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
         this.tokenProvider = Objects.requireNonNull(tokenProvider, "tokenProvider");
         semaphore = new Semaphore(permitCount);
-        targetUri = URI.create(config.serviceEndpoint() + LoginSyncConstants.SYNC_USER_PATH);
+        targetUri = URI.create(config.serviceEndpoint());
         SSLContext sslContext = truststoreSslContext;
         if (sslContext == null) {
             try {
@@ -83,7 +84,7 @@ public class SyncClient implements AutoCloseable {
         }
 
         if (!semaphore.tryAcquire()) {
-            return SyncOutcome.SKIPPED_SATURATED;
+            return SyncOutcome.SATURATED;
         }
 
         try {

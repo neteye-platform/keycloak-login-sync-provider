@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -62,6 +63,18 @@ class LoginSyncAuthenticatorTest {
     }
 
     @Test
+    void postBrokerLoginSyncsTheLoginAndPermitsIt() {
+        givenFlow("post-broker-login", user("jdoe@example.com"));
+        when(syncClient.send(any())).thenReturn(SyncOutcome.SUCCESS);
+
+        authenticator(CONFIGURED).authenticate(context);
+
+        verify(syncClient, times(1)).send(any());
+        verify(context).success();
+        verify(context, never()).attempted();
+    }
+
+    @Test
     void unconfiguredProviderPermitsTheLoginWithoutSyncing() {
         givenFlow("authenticate", user("jdoe@example.com"));
 
@@ -105,10 +118,9 @@ class LoginSyncAuthenticatorTest {
                 "registration",
                 "reset-credentials",
                 "first-broker-login",
-                "post-broker-login",
                 "a-flow-path-invented-after-this-plan"
             })
-    void everyFlowPathOtherThanAuthenticateSkipsWithoutSyncing(String flowPath) {
+    void everyFlowPathOtherThanAuthenticateOrPostBrokerLoginSkipsWithoutSyncing(String flowPath) {
         givenFlow(flowPath, user("jdoe@example.com"));
 
         authenticator(CONFIGURED).authenticate(context);
@@ -125,7 +137,8 @@ class LoginSyncAuthenticatorTest {
                 "SERVER_ERROR",
                 "TIMEOUT",
                 "TRANSPORT_ERROR",
-                "TOKEN_UNAVAILABLE"
+                "TOKEN_UNAVAILABLE",
+                "SATURATED"
             })
     void failClosedBlocksTheLoginForEveryBlockingOutcome(SyncOutcome outcome) {
         assertTrue(outcome.blocksLogin());
@@ -140,7 +153,7 @@ class LoginSyncAuthenticatorTest {
     @ParameterizedTest
     @EnumSource(
             value = SyncOutcome.class,
-            names = {"SUCCESS", "SKIPPED_SATURATED"})
+            names = {"SUCCESS"})
     void failClosedStillPermitsTheLoginForEveryNonBlockingOutcome(SyncOutcome outcome) {
         givenFlow("authenticate", user("jdoe@example.com"));
         when(syncClient.send(any())).thenReturn(outcome);
@@ -190,7 +203,7 @@ class LoginSyncAuthenticatorTest {
 
         authenticator(CONFIGURED).authenticate(context);
 
-        verify(syncClient, org.mockito.Mockito.times(1)).send(any());
+        verify(syncClient, times(1)).send(any());
     }
 
     @Test

@@ -72,9 +72,10 @@ public class LoginSyncAuthenticator implements Authenticator {
             return;
         }
 
-        if (!LoginActionsService.AUTHENTICATE_PATH.equals(context.getFlowPath())) {
-            // A6: exhaustive by construction. Only the authenticate path synchronizes; the
-            // credential-reset path, the first-broker-login path, the post-broker-login path, the
+        if (!LoginActionsService.AUTHENTICATE_PATH.equals(context.getFlowPath())
+                && !LoginActionsService.POST_BROKER_LOGIN_PATH.equals(context.getFlowPath())) {
+            // A6: exhaustive by construction. Only the authenticate and post-broker-login paths
+            // synchronize; the credential-reset path, the first-broker-login path, the
             // account-creation path, a null path and any unknown future value all land here and
             // skip, so no wrong event_type can ever be emitted.
             LOG.debugf("Skipping login sync for flow path %s", context.getFlowPath());

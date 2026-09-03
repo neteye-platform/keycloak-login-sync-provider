@@ -1,0 +1,34 @@
+# This stack carries CONFIGURATION ONLY and MUST NOT provision realms, clients or roles.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.0
+    command: start-dev
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SERVICE_ENDPOINT: ${KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SERVICE_ENDPOINT}
+      KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SA_CLIENT_ID: ${KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SA_CLIENT_ID}
+      KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SA_CLIENT_SECRET: ${KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SA_CLIENT_SECRET}
+      KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SA_TOKEN_ENDPOINT: ${KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SA_TOKEN_ENDPOINT}
+      KC_SPI_AUTHENTICATOR__LOGIN_SYNC__HTTP_TIMEOUT_MS: ${KC_SPI_AUTHENTICATOR__LOGIN_SYNC__HTTP_TIMEOUT_MS}
+      KC_SPI_AUTHENTICATOR__LOGIN_SYNC__ALLOW_INSECURE_HTTP: ${KC_SPI_AUTHENTICATOR__LOGIN_SYNC__ALLOW_INSECURE_HTTP:-false}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./target:/opt/keycloak/providers:z
+
+  mock-syncservice:
+    image: docker.io/library/eclipse-temurin:21-jre
+    command:
+      - java
+      - -cp
+      - /opt/mock/test-classes
+      - com.wuerthit.keycloak.authenticators.loginsync.support.MockSyncService
+    environment:
+      MOCK_PORT: ${MOCK_PORT}
+    ports:
+      - "${MOCK_PORT}:${MOCK_PORT}"
+    volumes:
+      - ./target/test-classes:/opt/mock/test-classes:ro,z

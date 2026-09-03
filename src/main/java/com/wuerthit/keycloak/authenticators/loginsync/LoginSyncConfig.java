@@ -12,6 +12,8 @@ import org.keycloak.Config;
  * installs on the same server. A malformed value aborts provider startup for the whole server even
  * when the provider is bound to no flow, and this is deliberate, because a malformed value is an
  * operator error that must be seen.
+ *
+ * @param serviceEndpoint the complete receiver URL, including its path
  */
 public record LoginSyncConfig(
         String serviceEndpoint,
@@ -26,9 +28,13 @@ public record LoginSyncConfig(
         String saClientSecret = scope.get(LoginSyncConstants.CONFIG_SA_CLIENT_SECRET);
         String saTokenEndpoint = scope.get(LoginSyncConstants.CONFIG_SA_TOKEN_ENDPOINT);
         String timeoutValue = scope.get(LoginSyncConstants.CONFIG_HTTP_TIMEOUT_MS);
+        boolean allowInsecureHttp =
+                Boolean.parseBoolean(scope.get(LoginSyncConstants.CONFIG_ALLOW_INSECURE_HTTP));
 
-        validateUrlWhenPresent(serviceEndpoint, LoginSyncConstants.CONFIG_SERVICE_ENDPOINT);
-        validateUrlWhenPresent(saTokenEndpoint, LoginSyncConstants.CONFIG_SA_TOKEN_ENDPOINT);
+        validateUrlWhenPresent(
+                serviceEndpoint, LoginSyncConstants.CONFIG_SERVICE_ENDPOINT, allowInsecureHttp);
+        validateUrlWhenPresent(
+                saTokenEndpoint, LoginSyncConstants.CONFIG_SA_TOKEN_ENDPOINT, allowInsecureHttp);
 
         return new LoginSyncConfig(
                 serviceEndpoint,
@@ -77,7 +83,8 @@ public record LoginSyncConfig(
         }
     }
 
-    private static void validateUrlWhenPresent(String value, String key) {
+    private static void validateUrlWhenPresent(
+            String value, String key, boolean allowInsecureHttp) {
         if (!isPresent(value)) {
             return;
         }
@@ -85,10 +92,18 @@ public record LoginSyncConfig(
         try {
             URI uri = new URI(value);
             String scheme = uri.getScheme();
+            boolean http = scheme != null && scheme.equalsIgnoreCase("http");
             if (!uri.isAbsolute()
                     || scheme == null
-                    || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+                    || !(http || scheme.equalsIgnoreCase("https"))) {
                 throw new IllegalStateException(key + " must be an absolute HTTP or HTTPS URL");
+            }
+            if (http && !allowInsecureHttp) {
+                throw new IllegalStateException(
+                        key
+                                + " must be an HTTPS URL; plain HTTP is rejected unless "
+                                + LoginSyncConstants.CONFIG_ALLOW_INSECURE_HTTP
+                                + " is enabled");
             }
         } catch (URISyntaxException exception) {
             throw new IllegalStateException(
