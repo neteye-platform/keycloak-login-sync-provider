@@ -76,6 +76,7 @@ class LoginSyncIT {
     private static final String LOGIN_SYNC_FAILED =
             "We could not complete your sign-in. Please try again later.";
     private static final String FLOW_ALIAS = "browser-with-login-sync";
+    private static final String SYNC_PATH = "/api/sync-user";
 
     private GenericContainer<?> keycloak;
     private MockSyncService mock;
@@ -95,7 +96,7 @@ class LoginSyncIT {
                         + providerJar
                         + "; run `scripts/test.sh verify`, not `scripts/test.sh test`");
 
-        String serviceEndpoint = "http://host.testcontainers.internal:" + mock.port();
+        String serviceEndpoint = "http://host.testcontainers.internal:" + mock.port() + SYNC_PATH;
         keycloak =
                 new GenericContainer<>(
                                 "quay.io/keycloak/keycloak:"
@@ -365,17 +366,33 @@ class LoginSyncIT {
 
         @Test
         @Order(1)
-        void keycloakRemainsAvailableWhileTwentySyncsAreBlackHoled() throws Exception {
+        void keycloakRemainsAvailableAndSaturationBlocksWithoutCallingTheReceiver()
+                throws Exception {
             mock.setMode(MockSyncService.Mode.BLACKHOLE);
             mock.reset();
             List<Future<Result>> logins = new ArrayList<>();
 
             try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                for (int index = 0; index < 20; index++) {
+                for (int index = 0;
+                        index < LoginSyncConstants.DEFAULT_MAX_CONCURRENT_SYNCS;
+                        index++) {
                     logins.add(executor.submit(() -> login(REALM)));
                 }
 
-                awaitRequestCount(20, Duration.ofSeconds(15));
+                awaitRequestCount(
+                        LoginSyncConstants.DEFAULT_MAX_CONCURRENT_SYNCS, Duration.ofSeconds(15));
+
+                // The parked requests hold every permit only until each 5-second client timeout;
+                // issue the next login immediately after the request-count barrier so it reaches
+                // tryAcquire inside that window. A future slow-runner flake here means the window
+                // was missed, not that saturation became fail-open.
+                Result saturatedLogin = login(REALM);
+                assertBlocked(saturatedLogin);
+                assertEquals(
+                        LoginSyncConstants.DEFAULT_MAX_CONCURRENT_SYNCS,
+                        mock.requests().size(),
+                        "A saturated sync must not call the receiver");
+
                 HttpResponse<Void> response =
                         HttpClient.newHttpClient()
                                 .send(
@@ -393,7 +410,7 @@ class LoginSyncIT {
 
                 mock.setMode(MockSyncService.Mode.OK);
                 for (Future<Result> pending : logins) {
-                    pending.get(10, TimeUnit.SECONDS);
+                    assertBlocked(pending.get(10, TimeUnit.SECONDS));
                 }
             } finally {
                 mock.setMode(MockSyncService.Mode.OK);

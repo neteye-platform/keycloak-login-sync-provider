@@ -1,7 +1,7 @@
 package com.wuerthit.keycloak.authenticators.loginsync;
 
 /**
- * Shared configuration and contract constants for the login-sync provider.
+ * Shared configuration constants for the login-sync provider.
  *
  * <p>The {@code service-endpoint} configuration key maps to {@code
  * KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SERVICE_ENDPOINT}; the double underscore is empirically
@@ -9,9 +9,6 @@ package com.wuerthit.keycloak.authenticators.loginsync;
  */
 public final class LoginSyncConstants {
     public static final String PROVIDER_ID = "login-sync";
-
-    /** Provisional contract; this is the single change point for the sync-user path. */
-    public static final String SYNC_USER_PATH = "/api/sync-user";
 
     public static final String CONFIG_SERVICE_ENDPOINT = "service-endpoint";
     public static final String CONFIG_SA_CLIENT_ID = "sa-client-id";
