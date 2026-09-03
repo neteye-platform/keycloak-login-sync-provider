@@ -127,6 +127,10 @@ public final class MockSyncService implements Closeable {
             if (park(exchange)) {
                 return;
             }
+            if (closed.get()) {
+                exchange.close();
+                return;
+            }
             selectedMode = mode;
         }
         if (selectedMode == Mode.TIMEOUT) {

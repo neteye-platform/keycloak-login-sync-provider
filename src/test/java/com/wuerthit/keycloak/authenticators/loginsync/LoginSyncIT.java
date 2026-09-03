@@ -89,7 +89,12 @@ class LoginSyncIT {
         mock = new MockSyncService();
         Testcontainers.exposeHostPorts(mock.port());
 
-        File providerJar = new File(System.getProperty("provider.jar"));
+        String providerJarPath = System.getProperty("provider.jar");
+        assertNotNull(
+                providerJarPath,
+                "The provider.jar system property is not set;"
+                        + " run `scripts/test.sh verify`, not `scripts/test.sh test`");
+        File providerJar = new File(providerJarPath);
         assertTrue(
                 providerJar.isFile(),
                 "The provider jar is missing at "
@@ -374,44 +379,53 @@ class LoginSyncIT {
             List<Future<Result>> logins = new ArrayList<>();
 
             try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                for (int index = 0;
-                        index < LoginSyncConstants.DEFAULT_MAX_CONCURRENT_SYNCS;
-                        index++) {
-                    logins.add(executor.submit(() -> login(REALM)));
-                }
+                try {
+                    for (int index = 0;
+                            index < LoginSyncConstants.DEFAULT_MAX_CONCURRENT_SYNCS;
+                            index++) {
+                        logins.add(executor.submit(() -> login(REALM)));
+                    }
 
-                awaitRequestCount(
-                        LoginSyncConstants.DEFAULT_MAX_CONCURRENT_SYNCS, Duration.ofSeconds(15));
+                    awaitRequestCount(
+                            LoginSyncConstants.DEFAULT_MAX_CONCURRENT_SYNCS,
+                            Duration.ofSeconds(15));
 
-                // The parked requests hold every permit only until each 5-second client timeout;
-                // issue the next login immediately after the request-count barrier so it reaches
-                // tryAcquire inside that window. A future slow-runner flake here means the window
-                // was missed, not that saturation became fail-open.
-                Result saturatedLogin = login(REALM);
-                assertBlocked(saturatedLogin);
-                assertEquals(
-                        LoginSyncConstants.DEFAULT_MAX_CONCURRENT_SYNCS,
-                        mock.requests().size(),
-                        "A saturated sync must not call the receiver");
+                    // The parked requests hold every permit only until each 5-second client
+                    // timeout;
+                    // issue the next login immediately after the request-count barrier so it
+                    // reaches
+                    // tryAcquire inside that window. A future slow-runner flake here means the
+                    // window
+                    // was missed, not that saturation became fail-open.
+                    Result saturatedLogin = login(REALM);
+                    assertBlocked(saturatedLogin);
+                    assertEquals(
+                            LoginSyncConstants.DEFAULT_MAX_CONCURRENT_SYNCS,
+                            mock.requests().size(),
+                            "A saturated sync must not call the receiver");
 
-                HttpResponse<Void> response =
-                        HttpClient.newHttpClient()
-                                .send(
-                                        HttpRequest.newBuilder(
-                                                        URI.create(
-                                                                keycloakBaseUrl + "/realms/master"))
-                                                .timeout(Duration.ofSeconds(2))
-                                                .GET()
-                                                .build(),
-                                        HttpResponse.BodyHandlers.discarding());
-                assertEquals(
-                        200,
-                        response.statusCode(),
-                        "Keycloak must remain responsive while sync calls are black-holed");
+                    HttpResponse<Void> response =
+                            HttpClient.newHttpClient()
+                                    .send(
+                                            HttpRequest.newBuilder(
+                                                            URI.create(
+                                                                    keycloakBaseUrl
+                                                                            + "/realms/master"))
+                                                    .timeout(Duration.ofSeconds(2))
+                                                    .GET()
+                                                    .build(),
+                                            HttpResponse.BodyHandlers.discarding());
+                    assertEquals(
+                            200,
+                            response.statusCode(),
+                            "Keycloak must remain responsive while sync calls are black-holed");
 
-                mock.setMode(MockSyncService.Mode.OK);
-                for (Future<Result> pending : logins) {
-                    assertBlocked(pending.get(10, TimeUnit.SECONDS));
+                    mock.setMode(MockSyncService.Mode.OK);
+                    for (Future<Result> pending : logins) {
+                        assertBlocked(pending.get(10, TimeUnit.SECONDS));
+                    }
+                } finally {
+                    executor.shutdownNow();
                 }
             } finally {
                 mock.setMode(MockSyncService.Mode.OK);
