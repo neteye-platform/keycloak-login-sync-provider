@@ -63,6 +63,10 @@ if goals_need_container_socket "${goals[@]}"; then
 fi
 
 if command -v mvn >/dev/null 2>&1; then
+    if [ -n "$socket" ] && [ "$socket" = "$podman_socket" ]; then
+        export DOCKER_HOST="unix://$socket"
+        export TESTCONTAINERS_RYUK_DISABLED=true
+    fi
     mvn -B "${goals[@]}"
     exit $?
 fi

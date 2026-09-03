@@ -24,6 +24,10 @@ Content-Type: application/json
 `endpoint`; that difference is flagged for alignment by the LLD owner, not adopted here. The
 provider posts to this URL verbatim, consistently with the complete `sa-token-endpoint` URL.
 
+Plain-HTTP `http://` endpoints are accepted only when the development-only `allow-insecure-http`
+opt-in (`KC_SPI_AUTHENTICATOR__LOGIN_SYNC__ALLOW_INSECURE_HTTP=true`) is set. In production both
+credential-bearing endpoints must use HTTPS; see the configuration section of the README.
+
 Upgrading from an earlier version is a breaking configuration change: an existing base-only URL
 must be updated to include the receiver path, or the provider will post to that base URL instead.
 
