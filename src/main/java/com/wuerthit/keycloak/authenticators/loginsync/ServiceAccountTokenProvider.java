@@ -9,6 +9,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -19,6 +20,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.net.ssl.SSLContext;
 
 public class ServiceAccountTokenProvider implements AutoCloseable {
     private static final Duration REFRESH_MARGIN = Duration.ofSeconds(60);
@@ -35,18 +37,39 @@ public class ServiceAccountTokenProvider implements AutoCloseable {
     private CompletableFuture<CachedToken> inFlightRefresh;
 
     public ServiceAccountTokenProvider(LoginSyncConfig config) {
-        this(config, Clock.systemUTC());
+        this(config, Clock.systemUTC(), null);
     }
 
     ServiceAccountTokenProvider(LoginSyncConfig config, Clock clock) {
+        this(config, clock, null);
+    }
+
+    /**
+     * Builds the token transport with the receiver trust context.
+     *
+     * <p>The token endpoint carries the service-account client secret, so it must use Keycloak's
+     * truststore. A {@code null} context falls back to the JVM default without weakening
+     * certificate or hostname verification.
+     */
+    ServiceAccountTokenProvider(
+            LoginSyncConfig config, Clock clock, SSLContext truststoreSslContext) {
         this.config = Objects.requireNonNull(config, "config");
         this.clock = Objects.requireNonNull(clock, "clock");
+        SSLContext sslContext = truststoreSslContext;
+        if (sslContext == null) {
+            try {
+                sslContext = SSLContext.getDefault();
+            } catch (NoSuchAlgorithmException exception) {
+                throw new IllegalStateException("default TLS context is unavailable", exception);
+            }
+        }
         httpExecutor = Executors.newCachedThreadPool();
         httpClient =
                 HttpClient.newBuilder()
                         .connectTimeout(
                                 Duration.ofMillis(LoginSyncConstants.DEFAULT_CONNECT_TIMEOUT_MS))
                         .executor(httpExecutor)
+                        .sslContext(sslContext)
                         .build();
     }
 
