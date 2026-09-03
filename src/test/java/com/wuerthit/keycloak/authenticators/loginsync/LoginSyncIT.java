@@ -119,6 +119,7 @@ class LoginSyncIT {
                                 "KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SA_TOKEN_ENDPOINT",
                                 INTERNAL_SA_ISSUER + "/protocol/openid-connect/token")
                         .withEnv("KC_SPI_AUTHENTICATOR__LOGIN_SYNC__HTTP_TIMEOUT_MS", "5000")
+                        .withEnv("KC_SPI_AUTHENTICATOR__LOGIN_SYNC__ALLOW_INSECURE_HTTP", "true")
                         .withCommand("start-dev")
                         .withExposedPorts(8080)
                         .waitingFor(Wait.forHttp("/realms/master").forPort(8080).forStatusCode(200))

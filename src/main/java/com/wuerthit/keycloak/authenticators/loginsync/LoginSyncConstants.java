@@ -16,6 +16,9 @@ public final class LoginSyncConstants {
     public static final String CONFIG_SA_TOKEN_ENDPOINT = "sa-token-endpoint";
     public static final String CONFIG_HTTP_TIMEOUT_MS = "http-timeout-ms";
 
+    /** Opt-out that permits plain-HTTP endpoints in a private test/dev network. */
+    public static final String CONFIG_ALLOW_INSECURE_HTTP = "allow-insecure-http";
+
     public static final int DEFAULT_HTTP_TIMEOUT_MS = 5000;
 
     /** Plan 0004 bulkhead limit; deliberately not operator-facing. */

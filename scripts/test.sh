@@ -82,12 +82,17 @@ if [ -z "$runtime" ]; then
 fi
 
 extra_env=()
-if [ -z "$socket" ]; then
-    require_container_socket
-fi
-if [ "$socket" = "$podman_socket" ]; then
-    # Testcontainers' resource reaper cannot attach to a rootless daemon.
-    extra_env+=(-e TESTCONTAINERS_RYUK_DISABLED=true)
+mount_args=()
+if [ -n "$socket" ]; then
+    if [ "$socket" = "$podman_socket" ]; then
+        # Testcontainers' resource reaper cannot attach to a rootless daemon.
+        extra_env+=(-e TESTCONTAINERS_RYUK_DISABLED=true)
+    fi
+    # Testcontainers needs the host socket to start Keycloak.
+    mount_args+=(
+        --volume "$socket:/var/run/docker.sock"
+        --env DOCKER_HOST=unix:///var/run/docker.sock
+    )
 fi
 
 # Survives between runs, so only the first one pays for the dependencies.
@@ -102,7 +107,6 @@ mkdir -p "$maven_cache"
     --volume "$repo_root:/workspace:Z" \
     --workdir /workspace \
     --volume "$maven_cache:/root/.m2:Z" \
-    --volume "$socket:/var/run/docker.sock" \
-    --env DOCKER_HOST=unix:///var/run/docker.sock \
+    "${mount_args[@]}" \
     "${extra_env[@]}" \
     "$MAVEN_IMAGE" mvn -B "${goals[@]}"

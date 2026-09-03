@@ -31,19 +31,30 @@ jobs:
         id: version
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           pom_version="$(mvn -q -B help:evaluate \
             -Dexpression=project.version -DforceStdout)"
           tag="v${pom_version}"
           echo "pom_version=$pom_version" >>"$GITHUB_OUTPUT"
           echo "tag=$tag" >>"$GITHUB_OUTPUT"
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "release_exists=true" >>"$GITHUB_OUTPUT"
-            echo "::notice::GitHub Release $tag already exists; nothing to release."
-          else
-            echo "release_exists=false" >>"$GITHUB_OUTPUT"
-            echo "::notice::Releasing $tag."
-          fi
+          status="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/releases/tags/$tag")"
+          case "$status" in
+            200)
+              echo "release_exists=true" >>"$GITHUB_OUTPUT"
+              echo "::notice::GitHub Release $tag already exists; nothing to release."
+              ;;
+            404)
+              echo "release_exists=false" >>"$GITHUB_OUTPUT"
+              echo "::notice::Releasing $tag."
+              ;;
+            *)
+              echo "::error::Unexpected GitHub API status $status while checking release $tag."
+              exit 1
+              ;;
+          esac
 
       - name: Build
         if: steps.version.outputs.release_exists == 'false'
@@ -67,14 +78,25 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
           TAG: ${{ steps.version.outputs.tag }}
+          REPO: ${{ github.repository }}
         run: |
-          if gh api --method GET "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
-            echo "::notice::Tag $TAG already exists; retaining it."
-          else
-            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-              -f ref="refs/tags/$TAG" \
-              -f sha="$(git rev-parse HEAD)"
-          fi
+          status="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/git/ref/tags/$TAG")"
+          case "$status" in
+            200)
+              echo "::notice::Tag $TAG already exists; retaining it."
+              ;;
+            404)
+              gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+                -f ref="refs/tags/$TAG" \
+                -f sha="$(git rev-parse HEAD)"
+              ;;
+            *)
+              echo "::error::Unexpected GitHub API status $status while checking tag $TAG."
+              exit 1
+              ;;
+          esac
 
       - name: Create GitHub release
         if: steps.version.outputs.release_exists == 'false'

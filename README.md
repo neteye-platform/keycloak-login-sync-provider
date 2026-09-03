@@ -49,6 +49,12 @@ segments is required; the form with one underscore does not resolve. Plain
   Scope key `sa-token-endpoint`. Required, no default.
 - `KC_SPI_AUTHENTICATOR__LOGIN_SYNC__HTTP_TIMEOUT_MS`
   Scope key `http-timeout-ms`. Optional, with a default of `5000` milliseconds.
+- `KC_SPI_AUTHENTICATOR__LOGIN_SYNC__ALLOW_INSECURE_HTTP`
+  Scope key `allow-insecure-http`. Optional, defaults to `false`. The
+  credential-bearing endpoints (`service-endpoint` and `sa-token-endpoint`)
+  must use `https://` unless this is `true`. Set it only for a private
+  test/dev network; enabling it in production disables TLS transport
+  protection for the service-account secret and the sync JWT.
 
 A missing required value degrades the provider to a no-op that permits logins.
 A malformed URL or a non-numeric or non-positive timeout deliberately aborts
