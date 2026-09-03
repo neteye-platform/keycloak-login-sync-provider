@@ -85,7 +85,25 @@ jobs:
             "https://api.github.com/repos/$REPO/git/ref/tags/$TAG")"
           case "$status" in
             200)
-              echo "::notice::Tag $TAG already exists; retaining it."
+              # Retain only a tag that actually points at the checked-out
+              # HEAD; otherwise the JAR built now would be published under a
+              # tag describing different code.
+              ref_json="$(curl -sS -f \
+                -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$REPO/git/ref/tags/$TAG")"
+              object_sha="$(printf '%s' "$ref_json" | jq -r '.object.sha')"
+              object_type="$(printf '%s' "$ref_json" | jq -r '.object.type')"
+              if [ "$object_type" = "tag" ]; then
+                # Annotated tag: dereference the tag object to its commit.
+                object_sha="$(curl -sS -f \
+                  -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                  "https://api.github.com/repos/$REPO/git/tags/$object_sha" | jq -r '.object.sha')"
+              fi
+              if [ "$object_sha" != "$(git rev-parse HEAD)" ]; then
+                echo "::error::Existing tag $TAG points to $object_sha, not built HEAD $(git rev-parse HEAD); refusing to publish under a mismatched tag."
+                exit 1
+              fi
+              echo "::notice::Tag $TAG already exists and points to HEAD; retaining it."
               ;;
             404)
               gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
