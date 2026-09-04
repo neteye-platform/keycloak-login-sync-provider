@@ -95,6 +95,7 @@ public record LoginSyncConfig(
             boolean http = scheme != null && scheme.equalsIgnoreCase("http");
             if (!uri.isAbsolute()
                     || scheme == null
+                    || uri.getHost() == null
                     || !(http || scheme.equalsIgnoreCase("https"))) {
                 throw new IllegalStateException(key + " must be an absolute HTTP or HTTPS URL");
             }

@@ -83,6 +83,30 @@ class LoginSyncConfigTest {
     }
 
     @Test
+    void rejectsServiceEndpointWithoutHost() {
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                        LoginSyncConfig.from(
+                                scope(
+                                        Map.of(
+                                                LoginSyncConstants.CONFIG_SERVICE_ENDPOINT,
+                                                "https:/receiver"))));
+    }
+
+    @Test
+    void rejectsTokenEndpointWithoutHost() {
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                        LoginSyncConfig.from(
+                                scope(
+                                        Map.of(
+                                                LoginSyncConstants.CONFIG_SA_TOKEN_ENDPOINT,
+                                                "https:/identity.example.test/token"))));
+    }
+
+    @Test
     void rejectsHttpServiceEndpointByDefault() {
         assertThrows(
                 IllegalStateException.class,

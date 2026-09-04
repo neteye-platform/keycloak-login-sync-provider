@@ -6,6 +6,7 @@ build:
 	scripts/test.sh clean test-compile package
 
 deploy: build
+	$(COMPOSE) up -d mock-syncservice
 	$(COMPOSE) up -d --force-recreate keycloak
 
 up: build

@@ -225,7 +225,7 @@ Per invariant P1 every check names a command; per P3 record `BASE_SHA`.
   - **Unknown/novel flow path:** `success()`, no sync call - proving the default is a real default.
   - **Sync failure blocks the login (fail-closed, A9):** `verify(context).failure(eq(INTERNAL_ERROR), any(), eq("login_sync_failed"), eq("loginSyncFailed"))` - for `REJECTED`, `SERVER_ERROR`, `TIMEOUT`, `TRANSPORT_ERROR` and `UNAUTHORIZED`.
   - **`TOKEN_UNAVAILABLE` blocks the login:** as above; the user is not permitted unsynced.
-  - **`SKIPPED_SATURATED` permits the login:** `success()` and no sync call.
+  - **`SATURATED` blocks the login:** `verify(context).failure(...)` - the bulkhead is full, no sync call, login blocked fail-closed.
   - **`SyncClient.send` throws `SyncFailedException`:** the login is blocked (fail-closed).
   - **`SyncClient.send` throws an unexpected `RuntimeException`:** the login is blocked (fail-closed).
   - **`action(...)`:** throws `IllegalStateException`.
@@ -258,5 +258,5 @@ Three commits: two `feat:` and one `test:`. `pom.xml` untouched, so no release f
 3. Only the `authenticate` and `post-broker-login` flow paths sync; every other path skips with no
    sync call.
 4. The sync is fail-closed: every blocking `SyncOutcome` blocks the login with a rendered
-   `loginSyncFailed` page, and saturating skip permits the login.
+   `loginSyncFailed` page, and bulkhead saturation blocks the login.
 5. The plugin never touches the authenticating user's token.
