@@ -134,6 +134,7 @@ public class SyncClient implements AutoCloseable {
 
     @Override
     public void close() {
+        httpClient.close();
         httpExecutor.shutdownNow();
         tokenProvider.close();
     }

@@ -113,6 +113,7 @@ public class ServiceAccountTokenProvider implements AutoCloseable {
 
     @Override
     public void close() {
+        httpClient.close();
         httpExecutor.shutdownNow();
     }
 
