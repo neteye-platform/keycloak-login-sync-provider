@@ -28,6 +28,9 @@ public record SyncPayload(
                 groups == null
                         ? List.of()
                         : groups.stream().sorted(Comparator.naturalOrder()).toList();
+        if (timestamp != null) {
+            timestamp = Instant.parse(timestamp).truncatedTo(ChronoUnit.SECONDS).toString();
+        }
     }
 
     public static SyncPayload login(

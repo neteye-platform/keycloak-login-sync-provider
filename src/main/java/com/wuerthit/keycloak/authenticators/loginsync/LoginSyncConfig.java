@@ -2,6 +2,7 @@ package com.wuerthit.keycloak.authenticators.loginsync;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import org.jboss.logging.Logger;
 import org.keycloak.Config;
 
 /**
@@ -22,6 +23,8 @@ public record LoginSyncConfig(
         String saTokenEndpoint,
         int httpTimeoutMs) {
 
+    private static final Logger LOG = Logger.getLogger(LoginSyncConfig.class);
+
     public static LoginSyncConfig from(Config.Scope scope) {
         String serviceEndpoint = scope.get(LoginSyncConstants.CONFIG_SERVICE_ENDPOINT);
         String saClientId = scope.get(LoginSyncConstants.CONFIG_SA_CLIENT_ID);
@@ -30,6 +33,16 @@ public record LoginSyncConfig(
         String timeoutValue = scope.get(LoginSyncConstants.CONFIG_HTTP_TIMEOUT_MS);
         boolean allowInsecureHttp =
                 Boolean.parseBoolean(scope.get(LoginSyncConstants.CONFIG_ALLOW_INSECURE_HTTP));
+
+        if (allowInsecureHttp) {
+            LOG.warnf(
+                    "%s is enabled: the credential-bearing endpoints (%s and %s) permit cleartext "
+                            + "HTTP transport of the service-account secret and the sync JWT. "
+                            + "Enable it only within a private test/dev network.",
+                    LoginSyncConstants.CONFIG_ALLOW_INSECURE_HTTP,
+                    LoginSyncConstants.CONFIG_SERVICE_ENDPOINT,
+                    LoginSyncConstants.CONFIG_SA_TOKEN_ENDPOINT);
+        }
 
         validateUrlWhenPresent(
                 serviceEndpoint, LoginSyncConstants.CONFIG_SERVICE_ENDPOINT, allowInsecureHttp);

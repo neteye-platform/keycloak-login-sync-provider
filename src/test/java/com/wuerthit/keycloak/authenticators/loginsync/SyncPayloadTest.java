@@ -74,6 +74,25 @@ class SyncPayloadTest {
     }
 
     @Test
+    void canonicalConstructorTruncatesTimestampToWholeSeconds() throws Exception {
+        SyncPayload payload =
+                new SyncPayload(
+                        "internal-portal",
+                        "jdoe",
+                        "jdoe@example.com",
+                        List.of(),
+                        Instant.parse("2026-08-24T09:15:32.123456789Z").toString());
+
+        String timestamp =
+                OBJECT_MAPPER
+                        .readTree(OBJECT_MAPPER.writeValueAsString(payload))
+                        .get("timestamp")
+                        .asText();
+
+        assertEquals("2026-08-24T09:15:32Z", timestamp);
+    }
+
+    @Test
     void sortsGroupsOnTheWireAndDefensivelyMakesThemUnmodifiable() throws Exception {
         SyncPayload payload =
                 SyncPayload.login(
