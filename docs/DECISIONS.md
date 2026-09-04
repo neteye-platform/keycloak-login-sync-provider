@@ -2,7 +2,7 @@
 
 This document reconciles the updated `LLD.pdf` with the superseded plan that preceded it. Each
 row records one reversal: what the old plan said, which LLD rule replaces it, and the action the
-implementation must take. Rows carry stable identifiers `R-01` through `R-10` so an audit can
+implementation must take. Rows carry stable identifiers `R-01` through `R-11` so an audit can
 grep for them.
 
 Authority order is the one stated in `docs/plans/README.md`: `LLD.pdf` pages 1-14 first, the
@@ -23,6 +23,7 @@ runtime behaviour is disputed.
 | R-08 Jackson pin. | Jackson was pulled in transitively at an unpinned version and risked shading a different copy into the jar. | Recorded by the completed baseline plan `0002-scaffold-reconciliation`, consistent with the packaging rules in LLD section 4.3. | `provided` Jackson is pinned to 2.21.2, which matches what Keycloak 26.7.0 actually ships, so the runtime copy and the compile-time copy agree. |
 | R-09 Additions beyond the LLD. | Nothing bounded concurrent outbound calls, TLS trust material was implicit, and client lifetime was unstated. | Not specified by the LLD; added deliberately and recorded here rather than left implicit. | Three additions. A bulkhead caps concurrent in-flight sync calls, so a slow receiver cannot exhaust Keycloak's worker threads and stall unrelated logins. A truststore-derived `SSLContext` pins the trust material for the receiver's certificate, so a private or internal certificate authority works without disabling verification. Per-JVM singleton documentation records that the HTTP client and the token cache are shared process-wide, so a reader does not assume per-request instances and reintroduce a connection leak. |
 | R-10 Keycloak REQUIRED-flow contract. | A deliberate skip called `context.attempted()`, on the assumption that it left the login untouched. | Verified from Keycloak 26.7.0 source: `AuthenticationProcessor.isSuccessful()` returns true only for `ExecutionStatus.SUCCESS`, so `context.attempted()` in a REQUIRED execution fails the login. | Every deliberate skip calls `context.success()`. Additionally, `requiresUser() == true` throws before `authenticate()` is invoked when no user is set, so a misplaced execution is rejected by Keycloak rather than skipping quietly; no null-user guard inside `authenticate()` can compensate. |
+| R-11 Flow-path whitelist widened (decision A6). | Only the `authenticate` flow path synchronized, so an identity-provider login never reached the sync. | Verified from Keycloak 26.7.0 source: an identity-provider login is completed through the post-broker-login flow (`IdpConfig.getPostBrokerLoginFlowId`, dispatched by `IdentityBrokerService.finishOrRedirectToPostBrokerLogin`), which runs under the `post-broker-login` flow path. | The `getFlowPath()` guard is a two-path whitelist: `LoginActionsService.AUTHENTICATE_PATH` and `LoginActionsService.POST_BROKER_LOGIN_PATH` synchronize. The guard is widened rather than removed, so `reset-credentials`, `first-broker-login`, `registration`, a null path, and any unknown future value still skip with `context.success()` and no wrong `event_type` is emitted. |
 
 ## Historical artifacts
 

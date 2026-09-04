@@ -2,22 +2,28 @@
 
 ## Purpose And Current State
 
-This repository will provide the Keycloak `login-sync` Authenticator. It is
-currently a Maven skeleton: no Java implementation, runtime resources, local
-dev stack, or root `README.md` exists.
+This repository provides the Keycloak `login-sync` Authenticator. The provider
+is implemented under `src/main/java/`, with its `AuthenticatorFactory` service
+file and `messages_en.properties` under `src/main/resources/`. Unit tests and
+the Testcontainers `LoginSyncIT` live under `src/test/java/`. The local dev
+stack (`podman-compose.yml`, `Makefile`, `.env.example`) and a root
+`README.md` all exist, and the release `push` trigger is active.
 
 ## Build And Test
 
 - Run Maven only through `scripts/test.sh`; it uses local Maven when
   available and otherwise a Java 21 Maven container.
 - `scripts/test.sh clean verify` is the full unit and integration-test gate.
+- Integration goals (`verify`, `integration-test`, `failsafe:integration-test`)
+  require a reachable container socket on both the local-Maven and
+  containerised paths; without one the script prints guidance and exits 1.
 - Java 21 is required. Spotless AOSP runs during Maven `validate`; Surefire runs
   `*Test` and Failsafe runs `*IT` during `verify`.
 
 ## Releases
 
-- The release workflow's `push` trigger remains commented until plan 0007
-  restores it; `workflow_dispatch` is active.
+- The release workflow runs on `push` to `main`; `workflow_dispatch` is also
+  active.
 - Each release workflow run resolves the POM version's `v<version>` Release. An
   existing Release is a no-op. When absent, it builds the POM version's jar,
   retains an existing tag or creates an absent one, then creates the Release.
