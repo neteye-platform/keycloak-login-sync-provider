@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Timeout;
 
 @Timeout(15)
 class SyncClientTest {
+    private static final String SYNC_PATH = "/api/sync-user";
     private static final String TOKEN_SENTINEL = "TOKEN_SENTINEL";
     private static final String SECRET_SENTINEL = "SECRET_SENTINEL";
     private static final String EXPECTED_BODY =
@@ -61,7 +62,7 @@ class SyncClientTest {
         expected.put(SyncOutcome.TIMEOUT, true);
         expected.put(SyncOutcome.TRANSPORT_ERROR, true);
         expected.put(SyncOutcome.TOKEN_UNAVAILABLE, true);
-        expected.put(SyncOutcome.SKIPPED_SATURATED, false);
+        expected.put(SyncOutcome.SATURATED, true);
 
         assertEquals(8, SyncOutcome.values().length);
         assertEquals(EnumSet.allOf(SyncOutcome.class), expected.keySet());
@@ -201,7 +202,7 @@ class SyncClientTest {
     }
 
     @Test
-    void skipsSaturatedBulkheadWithoutHttpCall() throws Exception {
+    void blocksTheLoginWhenBulkheadIsSaturatedRegardless() throws Exception {
         AtomicInteger requestCount = new AtomicInteger();
         startSyncServer(requestCount, new StubResponse(200, 0));
         StubTokenProvider tokenProvider =
@@ -211,9 +212,10 @@ class SyncClientTest {
 
         SyncOutcome outcome = client.send(payload());
 
-        assertSame(SyncOutcome.SKIPPED_SATURATED, outcome);
+        assertSame(SyncOutcome.SATURATED, outcome);
         assertRequestCount(requestCount, 0);
         assertEquals(1, tokenProvider.acquisitionCount());
+        assertTrue(outcome.blocksLogin());
     }
 
     @Test
@@ -245,7 +247,8 @@ class SyncClientTest {
     }
 
     @Test
-    void sendsRequestToConfiguredConstantPath() throws Exception {
+    void sendsRequestToTheConfiguredEndpointPathVerbatim() throws Exception {
+        String customPath = "/custom/receiver-path";
         AtomicInteger requestCount = new AtomicInteger();
         AtomicReference<String> requestPath = new AtomicReference<>();
         startSyncServer(
@@ -253,14 +256,19 @@ class SyncClientTest {
                 exchange -> {
                     requestPath.set(exchange.getRequestURI().getPath());
                     return new StubResponse(200, 0);
-                });
+                },
+                customPath);
+        LoginSyncConfig customConfig =
+                config(LoginSyncConstants.DEFAULT_HTTP_TIMEOUT_MS, customPath);
         SyncClient client =
-                client(new StubTokenProvider(config(), new TokenHandle(TOKEN_SENTINEL, 1)));
+                client(
+                        customConfig,
+                        new StubTokenProvider(customConfig, new TokenHandle(TOKEN_SENTINEL, 1)));
 
         SyncOutcome outcome = client.send(payload());
 
         assertSame(SyncOutcome.SUCCESS, outcome);
-        assertEquals(LoginSyncConstants.SYNC_USER_PATH, requestPath.get());
+        assertEquals(customPath, requestPath.get());
     }
 
     @Test
@@ -316,13 +324,26 @@ class SyncClientTest {
         startSyncServer(requestCount, responder, false);
     }
 
+    private void startSyncServer(AtomicInteger requestCount, Responder responder, String syncPath)
+            throws IOException {
+        server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        server.setExecutor(register(Executors.newCachedThreadPool()));
+        server.createContext(
+                syncPath,
+                exchange -> {
+                    requestCount.incrementAndGet();
+                    respond(exchange, responder);
+                });
+        server.start();
+    }
+
     private void startSyncServer(
             AtomicInteger requestCount, Responder responder, boolean includeTokenEndpoint)
             throws IOException {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.setExecutor(register(Executors.newCachedThreadPool()));
         server.createContext(
-                LoginSyncConstants.SYNC_USER_PATH,
+                SYNC_PATH,
                 exchange -> {
                     requestCount.incrementAndGet();
                     respond(exchange, responder);
@@ -383,13 +404,21 @@ class SyncClientTest {
     }
 
     private LoginSyncConfig config(int timeoutMillis) {
+        return config(timeoutMillis, SYNC_PATH);
+    }
+
+    private LoginSyncConfig config(int timeoutMillis, String syncPath) {
         String baseUrl =
                 "http://"
                         + server.getAddress().getHostString()
                         + ":"
                         + server.getAddress().getPort();
         return new LoginSyncConfig(
-                baseUrl, "sync-client", SECRET_SENTINEL, baseUrl + "/token", timeoutMillis);
+                baseUrl + syncPath,
+                "sync-client",
+                SECRET_SENTINEL,
+                baseUrl + "/token",
+                timeoutMillis);
     }
 
     private static SyncPayload payload() {
