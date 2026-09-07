@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
@@ -30,11 +31,8 @@ public class ServiceAccountTokenProvider implements AutoCloseable {
     private final Clock clock;
     private final ExecutorService httpExecutor;
     private final HttpClient httpClient;
-    private final AtomicReference<CachedToken> cachedToken = new AtomicReference<>();
+    private final ConcurrentHashMap<String, ScopeSlot> scopeSlots = new ConcurrentHashMap<>();
     private final AtomicLong nextGeneration = new AtomicLong();
-    private final Object refreshLock = new Object();
-
-    private CompletableFuture<CachedToken> inFlightRefresh;
 
     public ServiceAccountTokenProvider(LoginSyncConfig config) {
         this(config, Clock.systemUTC(), null);
@@ -73,38 +71,54 @@ public class ServiceAccountTokenProvider implements AutoCloseable {
                         .build();
     }
 
-    public TokenHandle acquire() {
+    /**
+     * Acquires a token for {@code scope}, isolated from every other scope's cache and refresh.
+     *
+     * @param scope the non-blank OAuth2 scope to request
+     * @return a reusable or newly fetched token handle for that scope
+     */
+    public TokenHandle acquire(String scope) {
+        ScopeSlot slot = slotFor(scope);
         Instant now = clock.instant();
-        CachedToken current = cachedToken.get();
+        CachedToken current = slot.cachedToken.get();
         if (isReusable(current, now)) {
             return current.handle();
         }
 
         CompletableFuture<CachedToken> refresh;
         boolean leader;
-        synchronized (refreshLock) {
-            current = cachedToken.get();
+        synchronized (slot.refreshLock) {
+            current = slot.cachedToken.get();
             if (isReusable(current, clock.instant())) {
                 return current.handle();
             }
-            if (inFlightRefresh == null) {
-                inFlightRefresh = new CompletableFuture<>();
+            if (slot.inFlightRefresh == null) {
+                slot.inFlightRefresh = new CompletableFuture<>();
                 leader = true;
             } else {
                 leader = false;
             }
-            refresh = inFlightRefresh;
+            refresh = slot.inFlightRefresh;
         }
 
         if (leader) {
-            completeRefresh(refresh);
+            completeRefresh(slot, scope, refresh);
         }
         return awaitRefresh(refresh).handle();
     }
 
-    public void invalidateIfCurrent(TokenHandle handle) {
+    /**
+     * Invalidates {@code handle} only when it is the current token cached for {@code scope}.
+     *
+     * <p>Tokens cached for other scopes are never inspected or evicted.
+     *
+     * @param scope the non-blank OAuth2 scope whose token may be invalidated
+     * @param handle the token handle to invalidate when its generation is current
+     */
+    public void invalidateIfCurrent(String scope, TokenHandle handle) {
+        ScopeSlot slot = slotFor(scope);
         Objects.requireNonNull(handle, "handle");
-        cachedToken.updateAndGet(
+        slot.cachedToken.updateAndGet(
                 current ->
                         current != null && current.handle().generation() == handle.generation()
                                 ? null
@@ -119,18 +133,14 @@ public class ServiceAccountTokenProvider implements AutoCloseable {
 
     @Override
     public String toString() {
-        CachedToken current = cachedToken.get();
-        return current == null
-                ? "ServiceAccountTokenProvider[cachedGeneration=none]"
-                : "ServiceAccountTokenProvider[cachedGeneration="
-                        + current.handle().generation()
-                        + "]";
+        return "ServiceAccountTokenProvider[cachedScopes=" + scopeSlots.size() + "]";
     }
 
-    private void completeRefresh(CompletableFuture<CachedToken> refresh) {
+    private void completeRefresh(
+            ScopeSlot slot, String scope, CompletableFuture<CachedToken> refresh) {
         try {
-            CachedToken fetched = fetchToken();
-            cachedToken.set(fetched);
+            CachedToken fetched = fetchToken(scope);
+            slot.cachedToken.set(fetched);
             refresh.complete(fetched);
         } catch (Throwable failure) {
             refresh.completeExceptionally(failure);
@@ -142,22 +152,22 @@ public class ServiceAccountTokenProvider implements AutoCloseable {
             }
             throw new IllegalStateException("unexpected checked token refresh failure", failure);
         } finally {
-            synchronized (refreshLock) {
-                if (inFlightRefresh == refresh) {
-                    inFlightRefresh = null;
+            synchronized (slot.refreshLock) {
+                if (slot.inFlightRefresh == refresh) {
+                    slot.inFlightRefresh = null;
                 }
             }
         }
     }
 
-    private CachedToken fetchToken() {
+    private CachedToken fetchToken(String scope) {
         // Retry and backoff are deliberately REMOVED per LLD 3.7 and R-01.
         try {
             HttpRequest request =
                     HttpRequest.newBuilder(URI.create(config.saTokenEndpoint()))
                             .timeout(Duration.ofMillis(LoginSyncConstants.DEFAULT_TOKEN_TIMEOUT_MS))
                             .header("Content-Type", "application/x-www-form-urlencoded")
-                            .POST(HttpRequest.BodyPublishers.ofString(formBody()))
+                            .POST(HttpRequest.BodyPublishers.ofString(formBody(scope)))
                             .build();
             HttpResponse<String> response =
                     httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -195,13 +205,28 @@ public class ServiceAccountTokenProvider implements AutoCloseable {
                 handle, expiresIn > 0 ? fetchedAt.plusSeconds(expiresIn) : fetchedAt);
     }
 
-    private String formBody() {
+    private String formBody(String scope) {
         return "grant_type="
                 + encode("client_credentials")
                 + "&client_id="
                 + encode(config.saClientId())
                 + "&client_secret="
-                + encode(config.saClientSecret());
+                + encode(config.saClientSecret())
+                + "&scope="
+                + encode(scope);
+    }
+
+    private ScopeSlot slotFor(String scope) {
+        String validatedScope = validateScope(scope);
+        return scopeSlots.computeIfAbsent(validatedScope, key -> new ScopeSlot());
+    }
+
+    private static String validateScope(String scope) {
+        Objects.requireNonNull(scope, "scope");
+        if (scope.isBlank()) {
+            throw new IllegalArgumentException("scope must not be blank");
+        }
+        return scope;
     }
 
     private static String encode(String value) {
@@ -226,6 +251,13 @@ public class ServiceAccountTokenProvider implements AutoCloseable {
     private static SyncFailedException unavailable(String redactedCause) {
         return new SyncFailedException(
                 SyncOutcome.TOKEN_UNAVAILABLE, new IllegalStateException(redactedCause));
+    }
+
+    private static final class ScopeSlot {
+        private final AtomicReference<CachedToken> cachedToken = new AtomicReference<>();
+        private final Object refreshLock = new Object();
+
+        private CompletableFuture<CachedToken> inFlightRefresh;
     }
 
     private record CachedToken(TokenHandle handle, Instant expiresAt) {}

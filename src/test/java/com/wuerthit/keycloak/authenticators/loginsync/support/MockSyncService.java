@@ -48,7 +48,7 @@ public final class MockSyncService implements Closeable {
 
     public enum Mode {
         OK("ok", 200),
-        CREATED("created", 201),
+        NO_CONTENT("no-content", 204),
         HTTP400("http400", 400),
         HTTP401("http401", 401),
         HTTP403("http403", 403),

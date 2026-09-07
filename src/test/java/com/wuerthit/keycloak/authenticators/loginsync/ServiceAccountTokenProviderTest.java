@@ -18,6 +18,7 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.SecureRandom;
@@ -56,8 +57,11 @@ class ServiceAccountTokenProviderTest {
     private static final Instant INITIAL_TIME = Instant.parse("2026-01-01T00:00:00Z");
     private static final String TOKEN_SENTINEL = "TOKEN_SENTINEL";
     private static final String SECRET_SENTINEL = "SECRET_SENTINEL";
+    private static final String TEST_SCOPE = "permissionsync:glpi";
+    private static final String OTHER_SCOPE = "permissionsync:grafana";
     private static final String EXPECTED_FORM =
-            "grant_type=client_credentials&client_id=client+id%2B%26&client_secret=secret+%2B%3D%26";
+            "grant_type=client_credentials&client_id=client+id%2B%26"
+                    + "&client_secret=secret+%2B%3D%26&scope=permissionsync%3Aglpi";
     private static final char[] TEST_KEY_PASSWORD = "changeit".toCharArray();
 
     // This throwaway self-signed PKCS12 exists only to serve loopback HTTPS in this test; it is not
@@ -89,7 +93,7 @@ class ServiceAccountTokenProviderTest {
 
         List<TokenHandle> handles = new ArrayList<>();
         for (int call = 0; call < 20; call++) {
-            handles.add(provider.acquire());
+            handles.add(provider.acquire(TEST_SCOPE));
         }
 
         assertEquals(1, requestCount.get());
@@ -103,10 +107,10 @@ class ServiceAccountTokenProviderTest {
         startServer(requestCount, request -> tokenResponse("token-" + request, 120));
         MutableClock clock = new MutableClock(INITIAL_TIME);
         ServiceAccountTokenProvider provider = provider(clock);
-        TokenHandle first = provider.acquire();
+        TokenHandle first = provider.acquire(TEST_SCOPE);
 
         clock.advance(Duration.ofSeconds(61));
-        TokenHandle second = provider.acquire();
+        TokenHandle second = provider.acquire(TEST_SCOPE);
 
         assertEquals(2, requestCount.get());
         assertNotEquals(first.generation(), second.generation());
@@ -126,7 +130,7 @@ class ServiceAccountTokenProviderTest {
                     callers.submit(
                             () -> {
                                 assertTrue(startGate.await(2, TimeUnit.SECONDS));
-                                return provider.acquire();
+                                return provider.acquire(TEST_SCOPE);
                             }));
         }
 
@@ -142,12 +146,109 @@ class ServiceAccountTokenProviderTest {
     }
 
     @Test
+    void twoDistinctScopesFetchAndCacheTwoDistinctTokens() throws Exception {
+        AtomicInteger requestCount = new AtomicInteger();
+        startServer(requestCount, ServiceAccountTokenProviderTest::tokenResponseForScope);
+        ServiceAccountTokenProvider provider = provider(Clock.fixed(INITIAL_TIME, ZoneOffset.UTC));
+
+        TokenHandle firstScope = provider.acquire(TEST_SCOPE);
+        TokenHandle secondScope = provider.acquire(OTHER_SCOPE);
+
+        assertEquals(2, requestCount.get());
+        assertNotEquals(firstScope.generation(), secondScope.generation());
+        assertEquals("glpi-token", firstScope.token());
+        assertEquals("grafana-token", secondScope.token());
+        assertSame(firstScope, provider.acquire(TEST_SCOPE));
+        assertSame(secondScope, provider.acquire(OTHER_SCOPE));
+        assertEquals(2, requestCount.get());
+    }
+
+    @Test
+    void blockedScopeRequestDoesNotBlockAnotherScope() throws Exception {
+        AtomicInteger requestCount = new AtomicInteger();
+        CountDownLatch firstScopeStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirstScope = new CountDownLatch(1);
+        startServer(
+                requestCount,
+                (request, form) -> {
+                    if (form.equals(expectedForm(TEST_SCOPE))) {
+                        firstScopeStarted.countDown();
+                        assertTrue(releaseFirstScope.await(5, TimeUnit.SECONDS));
+                    }
+                    return tokenResponseForScope(request, form);
+                });
+        ServiceAccountTokenProvider provider = provider(Clock.fixed(INITIAL_TIME, ZoneOffset.UTC));
+        ExecutorService callers = register(Executors.newFixedThreadPool(2));
+        Future<TokenHandle> blocked = callers.submit(() -> provider.acquire(TEST_SCOPE));
+        assertTrue(firstScopeStarted.await(3, TimeUnit.SECONDS));
+
+        TokenHandle independent;
+        try {
+            independent =
+                    callers.submit(() -> provider.acquire(OTHER_SCOPE)).get(3, TimeUnit.SECONDS);
+            assertFalse(blocked.isDone());
+        } finally {
+            releaseFirstScope.countDown();
+        }
+        TokenHandle released = blocked.get(3, TimeUnit.SECONDS);
+
+        assertEquals("glpi-token", released.token());
+        assertEquals("grafana-token", independent.token());
+        assertNotEquals(released.generation(), independent.generation());
+        assertEquals(2, requestCount.get());
+    }
+
+    @Test
+    void blockedSameScopeAcquisitionsCoalesceIntoOneRequest() throws Exception {
+        int callerCount = 16;
+        AtomicInteger requestCount = new AtomicInteger();
+        CountDownLatch requestStarted = new CountDownLatch(1);
+        CountDownLatch releaseRequest = new CountDownLatch(1);
+        startServer(
+                requestCount,
+                (request, form) -> {
+                    assertEquals(EXPECTED_FORM, form);
+                    requestStarted.countDown();
+                    assertTrue(releaseRequest.await(5, TimeUnit.SECONDS));
+                    return tokenResponse("shared-blocked-token", 300);
+                });
+        ServiceAccountTokenProvider provider = provider(Clock.fixed(INITIAL_TIME, ZoneOffset.UTC));
+        ExecutorService callers = register(Executors.newFixedThreadPool(callerCount));
+        CountDownLatch startGate = new CountDownLatch(1);
+        CountDownLatch callsIssued = new CountDownLatch(callerCount);
+        List<Future<TokenHandle>> results = new ArrayList<>();
+        for (int caller = 0; caller < callerCount; caller++) {
+            results.add(
+                    callers.submit(
+                            () -> {
+                                assertTrue(startGate.await(2, TimeUnit.SECONDS));
+                                callsIssued.countDown();
+                                return provider.acquire(TEST_SCOPE);
+                            }));
+        }
+
+        startGate.countDown();
+        assertTrue(requestStarted.await(3, TimeUnit.SECONDS));
+        assertTrue(callsIssued.await(3, TimeUnit.SECONDS));
+        releaseRequest.countDown();
+        List<TokenHandle> handles = new ArrayList<>();
+        for (Future<TokenHandle> result : results) {
+            handles.add(result.get(5, TimeUnit.SECONDS));
+        }
+
+        assertEquals(1, requestCount.get());
+        assertEquals(callerCount, handles.size());
+        assertEquals(1, handles.stream().map(TokenHandle::generation).distinct().count());
+    }
+
+    @Test
     void reportsTokenUnavailableAfterOneServerFailure() throws Exception {
         AtomicInteger requestCount = new AtomicInteger();
         startServer(requestCount, ignored -> new StubResponse(500, "failure"));
         ServiceAccountTokenProvider provider = provider(Clock.fixed(INITIAL_TIME, ZoneOffset.UTC));
 
-        SyncFailedException failure = assertThrows(SyncFailedException.class, provider::acquire);
+        SyncFailedException failure =
+                assertThrows(SyncFailedException.class, () -> provider.acquire(TEST_SCOPE));
 
         assertEquals(SyncOutcome.TOKEN_UNAVAILABLE, failure.outcome());
         assertEquals(1, requestCount.get());
@@ -167,7 +268,7 @@ class ServiceAccountTokenProviderTest {
                                 Clock.fixed(INITIAL_TIME, ZoneOffset.UTC),
                                 clientContext));
 
-        TokenHandle handle = provider.acquire();
+        TokenHandle handle = provider.acquire(TEST_SCOPE);
 
         assertEquals("tls-token", handle.token());
         assertEquals(1, requestCount.get());
@@ -181,8 +282,8 @@ class ServiceAccountTokenProviderTest {
         startServer(requestCount, ignored -> new StubResponse(200, responseBody));
         ServiceAccountTokenProvider provider = provider(Clock.fixed(INITIAL_TIME, ZoneOffset.UTC));
 
-        TokenHandle first = provider.acquire();
-        TokenHandle second = provider.acquire();
+        TokenHandle first = provider.acquire(TEST_SCOPE);
+        TokenHandle second = provider.acquire(TEST_SCOPE);
 
         assertEquals(2, requestCount.get());
         assertNotEquals(first.generation(), second.generation());
@@ -193,17 +294,38 @@ class ServiceAccountTokenProviderTest {
         AtomicInteger requestCount = new AtomicInteger();
         startServer(requestCount, request -> tokenResponse("generation-" + request, 300));
         ServiceAccountTokenProvider provider = provider(Clock.fixed(INITIAL_TIME, ZoneOffset.UTC));
-        TokenHandle generationOne = provider.acquire();
-        provider.invalidateIfCurrent(generationOne);
+        TokenHandle generationOne = provider.acquire(TEST_SCOPE);
+        provider.invalidateIfCurrent(TEST_SCOPE, generationOne);
 
         ExecutorService otherLogin = register(Executors.newSingleThreadExecutor());
-        TokenHandle generationTwo = otherLogin.submit(provider::acquire).get(5, TimeUnit.SECONDS);
-        provider.invalidateIfCurrent(generationOne);
-        TokenHandle followingLogin = provider.acquire();
+        TokenHandle generationTwo =
+                otherLogin.submit(() -> provider.acquire(TEST_SCOPE)).get(5, TimeUnit.SECONDS);
+        provider.invalidateIfCurrent(TEST_SCOPE, generationOne);
+        TokenHandle followingLogin = provider.acquire(TEST_SCOPE);
 
         assertNotEquals(generationOne.generation(), generationTwo.generation());
         assertEquals(generationTwo.generation(), followingLogin.generation());
         assertEquals(2, requestCount.get());
+    }
+
+    @Test
+    void staleScopedHandleCannotEvictNewerOrOtherScopeToken() throws Exception {
+        AtomicInteger requestCount = new AtomicInteger();
+        startServer(requestCount, ServiceAccountTokenProviderTest::tokenResponseForScope);
+        ServiceAccountTokenProvider provider = provider(Clock.fixed(INITIAL_TIME, ZoneOffset.UTC));
+        TokenHandle staleFirstScope = provider.acquire(TEST_SCOPE);
+        TokenHandle secondScope = provider.acquire(OTHER_SCOPE);
+        provider.invalidateIfCurrent(TEST_SCOPE, staleFirstScope);
+        TokenHandle newerFirstScope = provider.acquire(TEST_SCOPE);
+
+        provider.invalidateIfCurrent(TEST_SCOPE, staleFirstScope);
+        provider.invalidateIfCurrent(TEST_SCOPE, secondScope);
+
+        assertSame(newerFirstScope, provider.acquire(TEST_SCOPE));
+        assertSame(secondScope, provider.acquire(OTHER_SCOPE));
+        assertNotEquals(staleFirstScope.generation(), newerFirstScope.generation());
+        assertNotEquals(newerFirstScope.generation(), secondScope.generation());
+        assertEquals(3, requestCount.get());
     }
 
     @Test
@@ -214,13 +336,14 @@ class ServiceAccountTokenProviderTest {
                 registerProvider(
                         new FaultyUnconditionalProvider(
                                 config("secret +=&"), Clock.fixed(INITIAL_TIME, ZoneOffset.UTC)));
-        TokenHandle generationOne = provider.acquire();
-        provider.invalidateIfCurrent(generationOne);
+        TokenHandle generationOne = provider.acquire(TEST_SCOPE);
+        provider.invalidateIfCurrent(TEST_SCOPE, generationOne);
 
         ExecutorService otherLogin = register(Executors.newSingleThreadExecutor());
-        TokenHandle generationTwo = otherLogin.submit(provider::acquire).get(5, TimeUnit.SECONDS);
-        provider.invalidateIfCurrent(generationOne);
-        TokenHandle followingLogin = provider.acquire();
+        TokenHandle generationTwo =
+                otherLogin.submit(() -> provider.acquire(TEST_SCOPE)).get(5, TimeUnit.SECONDS);
+        provider.invalidateIfCurrent(TEST_SCOPE, generationOne);
+        TokenHandle followingLogin = provider.acquire(TEST_SCOPE);
 
         assertNotEquals(generationOne.generation(), generationTwo.generation());
         assertNotEquals(generationTwo.generation(), followingLogin.generation());
@@ -238,8 +361,9 @@ class ServiceAccountTokenProviderTest {
                                 : tokenResponse("recovered-token", 300));
         ServiceAccountTokenProvider provider = provider(Clock.fixed(INITIAL_TIME, ZoneOffset.UTC));
 
-        SyncFailedException failure = assertThrows(SyncFailedException.class, provider::acquire);
-        TokenHandle recovered = provider.acquire();
+        SyncFailedException failure =
+                assertThrows(SyncFailedException.class, () -> provider.acquire(TEST_SCOPE));
+        TokenHandle recovered = provider.acquire(TEST_SCOPE);
 
         assertEquals(SyncOutcome.TOKEN_UNAVAILABLE, failure.outcome());
         assertEquals("recovered-token", recovered.token());
@@ -253,15 +377,15 @@ class ServiceAccountTokenProviderTest {
         FetchFailureClock clock = new FetchFailureClock();
         ServiceAccountTokenProvider provider = provider(clock);
         ExecutorService callers = register(Executors.newFixedThreadPool(2));
-        Future<TokenHandle> leader = callers.submit(provider::acquire);
+        Future<TokenHandle> leader = callers.submit(() -> provider.acquire(TEST_SCOPE));
         assertTrue(clock.awaitFailurePoint());
-        Future<TokenHandle> follower = callers.submit(provider::acquire);
+        Future<TokenHandle> follower = callers.submit(() -> provider.acquire(TEST_SCOPE));
 
         ExecutionException leaderFailure =
                 assertThrows(ExecutionException.class, () -> leader.get(3, TimeUnit.SECONDS));
         ExecutionException followerFailure =
                 assertThrows(ExecutionException.class, () -> follower.get(3, TimeUnit.SECONDS));
-        TokenHandle recovered = provider.acquire();
+        TokenHandle recovered = provider.acquire(TEST_SCOPE);
 
         assertInstanceOf(FetchFailure.class, leaderFailure.getCause());
         SyncFailedException unavailable =
@@ -287,7 +411,8 @@ class ServiceAccountTokenProviderTest {
         ServiceAccountTokenProvider provider = provider(Clock.fixed(INITIAL_TIME, ZoneOffset.UTC));
         long startedAt = System.nanoTime();
 
-        SyncFailedException failure = assertThrows(SyncFailedException.class, provider::acquire);
+        SyncFailedException failure =
+                assertThrows(SyncFailedException.class, () -> provider.acquire(TEST_SCOPE));
 
         assertEquals(SyncOutcome.TOKEN_UNAVAILABLE, failure.outcome());
         assertEquals(1, requestCount.get());
@@ -301,12 +426,13 @@ class ServiceAccountTokenProviderTest {
         AtomicInteger requestCount = new AtomicInteger();
         startServer(
                 requestCount,
-                "grant_type=client_credentials&client_id=client+id%2B%26&client_secret=SECRET_SENTINEL",
+                "grant_type=client_credentials&client_id=client+id%2B%26"
+                        + "&client_secret=SECRET_SENTINEL&scope=permissionsync%3Aglpi",
                 ignored -> tokenResponse(TOKEN_SENTINEL, 300));
         LoginSyncConfig config = config(SECRET_SENTINEL);
         ServiceAccountTokenProvider provider =
                 registerProvider(new ServiceAccountTokenProvider(config));
-        TokenHandle handle = provider.acquire();
+        TokenHandle handle = provider.acquire(TEST_SCOPE);
         SyncFailedException failure =
                 new SyncFailedException(
                         SyncOutcome.TOKEN_UNAVAILABLE,
@@ -327,6 +453,8 @@ class ServiceAccountTokenProviderTest {
                     assertFalse(rendered.contains(SECRET_SENTINEL), "client secret leaked");
                 });
         assertEquals("TokenHandle[generation=1]", handle.toString());
+        assertEquals("ServiceAccountTokenProvider[cachedScopes=1]", provider.toString());
+        assertFalse(provider.toString().contains("permissionsync"), "scope leaked");
     }
 
     private static Stream<String> immediatelyExpiredResponses() {
@@ -347,6 +475,15 @@ class ServiceAccountTokenProviderTest {
             String expectedForm,
             IntFunction<StubResponse> responseForRequest)
             throws IOException {
+        startServer(
+                requestCount,
+                (request, form) -> {
+                    assertEquals(expectedForm, form);
+                    return responseForRequest.apply(request);
+                });
+    }
+
+    private void startServer(AtomicInteger requestCount, Responder responder) throws IOException {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         ExecutorService serverExecutor = register(Executors.newCachedThreadPool());
         server.setExecutor(serverExecutor);
@@ -356,10 +493,12 @@ class ServiceAccountTokenProviderTest {
                     int request = requestCount.incrementAndGet();
                     StubResponse response;
                     try {
-                        assertTokenRequest(exchange, expectedForm);
-                        response = responseForRequest.apply(request);
+                        response = responder.respond(request, readTokenRequest(exchange));
                     } catch (AssertionError assertion) {
                         response = new StubResponse(400, "invalid request");
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        response = new StubResponse(500, "interrupted response");
                     }
                     writeResponse(exchange, response);
                 });
@@ -395,13 +534,15 @@ class ServiceAccountTokenProviderTest {
 
     private static void assertTokenRequest(HttpExchange exchange, String expectedForm)
             throws IOException {
+        assertEquals(expectedForm, readTokenRequest(exchange));
+    }
+
+    private static String readTokenRequest(HttpExchange exchange) throws IOException {
         assertEquals("POST", exchange.getRequestMethod());
         assertEquals(
                 "application/x-www-form-urlencoded",
                 exchange.getRequestHeaders().getFirst("Content-Type"));
-        assertEquals(
-                expectedForm,
-                new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        return new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
     }
 
     private static void writeResponse(HttpExchange exchange, StubResponse response)
@@ -448,6 +589,27 @@ class ServiceAccountTokenProviderTest {
     private static StubResponse tokenResponse(String token, long expiresIn) {
         return new StubResponse(
                 200, "{\"access_token\":\"" + token + "\",\"expires_in\":" + expiresIn + "}");
+    }
+
+    private static StubResponse tokenResponseForScope(int request, String form) {
+        if (form.equals(expectedForm(TEST_SCOPE))) {
+            return tokenResponse("glpi-token", 300);
+        }
+        if (form.equals(expectedForm(OTHER_SCOPE))) {
+            return tokenResponse("grafana-token", 300);
+        }
+        throw new AssertionError("unexpected token request " + request);
+    }
+
+    private static String expectedForm(String scope) {
+        return "grant_type=client_credentials&client_id=client+id%2B%26"
+                + "&client_secret=secret+%2B%3D%26&scope="
+                + URLEncoder.encode(scope, StandardCharsets.UTF_8);
+    }
+
+    @FunctionalInterface
+    private interface Responder {
+        StubResponse respond(int request, String form) throws InterruptedException;
     }
 
     private record StubResponse(int status, String body) {}
@@ -570,15 +732,15 @@ class ServiceAccountTokenProviderTest {
         }
 
         @Override
-        public TokenHandle acquire() {
-            TokenHandle handle = super.acquire();
+        public TokenHandle acquire(String scope) {
+            TokenHandle handle = super.acquire(scope);
             current.set(handle);
             return handle;
         }
 
         @Override
-        public void invalidateIfCurrent(TokenHandle ignored) {
-            super.invalidateIfCurrent(current.get());
+        public void invalidateIfCurrent(String scope, TokenHandle ignored) {
+            super.invalidateIfCurrent(scope, current.get());
         }
     }
 }

@@ -12,6 +12,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -46,18 +47,17 @@ class LoginSyncAuthenticatorTest {
     @Test
     void happyPathSyncsTheLoginAndPermitsIt() {
         givenFlow("authenticate", user("jdoe@example.com", "engineering", "staff"));
-        when(syncClient.send(any())).thenReturn(SyncOutcome.SUCCESS);
+        when(syncClient.send(any(), eq("permissionsync:glpi"))).thenReturn(SyncOutcome.SUCCESS);
 
         authenticator(CONFIGURED).authenticate(context);
 
         ArgumentCaptor<SyncPayload> payload = ArgumentCaptor.forClass(SyncPayload.class);
-        verify(syncClient).send(payload.capture());
-        assertEquals("internal-portal", payload.getValue().clientId());
+        ArgumentCaptor<String> scope = ArgumentCaptor.forClass(String.class);
+        verify(syncClient).send(payload.capture(), scope.capture());
         assertEquals("jdoe", payload.getValue().username());
-        assertEquals("jdoe@example.com", payload.getValue().email());
         assertEquals(List.of("/engineering", "/staff"), payload.getValue().groups());
         assertEquals("LOGIN", payload.getValue().eventType());
-        assertNotNull(payload.getValue().timestamp());
+        assertEquals("permissionsync:glpi", scope.getValue());
         verify(context).success();
         verify(context, never()).attempted();
     }
@@ -65,11 +65,11 @@ class LoginSyncAuthenticatorTest {
     @Test
     void postBrokerLoginSyncsTheLoginAndPermitsIt() {
         givenFlow("post-broker-login", user("jdoe@example.com"));
-        when(syncClient.send(any())).thenReturn(SyncOutcome.SUCCESS);
+        when(syncClient.send(any(), eq("permissionsync:glpi"))).thenReturn(SyncOutcome.SUCCESS);
 
         authenticator(CONFIGURED).authenticate(context);
 
-        verify(syncClient, times(1)).send(any());
+        verify(syncClient, times(1)).send(any(), eq("permissionsync:glpi"));
         verify(context).success();
         verify(context, never()).attempted();
     }
@@ -111,6 +111,40 @@ class LoginSyncAuthenticatorTest {
         assertSkippedWithoutSync();
     }
 
+    @Test
+    void nullClientIdPermitsTheLoginWithoutSyncing() {
+        givenFlow("authenticate", user("jdoe@example.com"));
+        when(client.getClientId()).thenReturn(null);
+
+        authenticator(CONFIGURED).authenticate(context);
+
+        assertSkippedWithoutSync();
+        verifyNoInteractions(syncClient);
+    }
+
+    @Test
+    void blankClientIdPermitsTheLoginWithoutSyncing() {
+        givenFlow("authenticate", user("jdoe@example.com"));
+        when(client.getClientId()).thenReturn(" ");
+
+        authenticator(CONFIGURED).authenticate(context);
+
+        assertSkippedWithoutSync();
+        verifyNoInteractions(syncClient);
+    }
+
+    @Test
+    void scopeIsDerivedFromTheLoginClientId() {
+        givenFlow("authenticate", user("jdoe@example.com"));
+        when(client.getClientId()).thenReturn("grafana");
+        when(syncClient.send(any(), eq("permissionsync:grafana"))).thenReturn(SyncOutcome.SUCCESS);
+
+        authenticator(CONFIGURED).authenticate(context);
+
+        verify(syncClient).send(any(), eq("permissionsync:grafana"));
+        verify(context).success();
+    }
+
     @ParameterizedTest
     @NullSource
     @ValueSource(
@@ -143,7 +177,7 @@ class LoginSyncAuthenticatorTest {
     void failClosedBlocksTheLoginForEveryBlockingOutcome(SyncOutcome outcome) {
         assertTrue(outcome.blocksLogin());
         givenFlow("authenticate", user("jdoe@example.com"));
-        when(syncClient.send(any())).thenReturn(outcome);
+        when(syncClient.send(any(), eq("permissionsync:glpi"))).thenReturn(outcome);
 
         authenticator(CONFIGURED).authenticate(context);
 
@@ -156,7 +190,7 @@ class LoginSyncAuthenticatorTest {
             names = {"SUCCESS"})
     void failClosedStillPermitsTheLoginForEveryNonBlockingOutcome(SyncOutcome outcome) {
         givenFlow("authenticate", user("jdoe@example.com"));
-        when(syncClient.send(any())).thenReturn(outcome);
+        when(syncClient.send(any(), eq("permissionsync:glpi"))).thenReturn(outcome);
 
         authenticator(CONFIGURED).authenticate(context);
 
@@ -168,7 +202,7 @@ class LoginSyncAuthenticatorTest {
     @Test
     void blocksTheLoginWhenSendReportsAFailedSync() {
         givenFlow("authenticate", user("jdoe@example.com"));
-        when(syncClient.send(any()))
+        when(syncClient.send(any(), eq("permissionsync:glpi")))
                 .thenThrow(new SyncFailedException(SyncOutcome.TOKEN_UNAVAILABLE));
 
         authenticator(CONFIGURED).authenticate(context);
@@ -179,7 +213,8 @@ class LoginSyncAuthenticatorTest {
     @Test
     void blocksTheLoginWhenSendThrowsAnUnexpectedRuntimeFailure() {
         givenFlow("authenticate", user("jdoe@example.com"));
-        when(syncClient.send(any())).thenThrow(new IllegalStateException("boom"));
+        when(syncClient.send(any(), eq("permissionsync:glpi")))
+                .thenThrow(new IllegalStateException("boom"));
 
         authenticator(CONFIGURED).authenticate(context);
 
@@ -189,7 +224,7 @@ class LoginSyncAuthenticatorTest {
     @Test
     void blocksTheLoginWhenSendReportsNoOutcomeAtAll() {
         givenFlow("authenticate", user("jdoe@example.com"));
-        when(syncClient.send(any())).thenReturn(null);
+        when(syncClient.send(any(), eq("permissionsync:glpi"))).thenReturn(null);
 
         authenticator(CONFIGURED).authenticate(context);
 
@@ -199,17 +234,19 @@ class LoginSyncAuthenticatorTest {
     @Test
     void syncsExactlyOncePerLoginAndNeverRetries() {
         givenFlow("authenticate", user("jdoe@example.com"));
-        when(syncClient.send(any())).thenReturn(SyncOutcome.SERVER_ERROR);
+        when(syncClient.send(any(), eq("permissionsync:glpi")))
+                .thenReturn(SyncOutcome.SERVER_ERROR);
 
         authenticator(CONFIGURED).authenticate(context);
 
-        verify(syncClient, times(1)).send(any());
+        verify(syncClient, times(1)).send(any(), eq("permissionsync:glpi"));
     }
 
     @Test
     void aBlockedLoginKeepsUserDataOutOfEveryReportedMessage() {
         givenFlow("authenticate", user("email@" + "sentinel.test", "GROUP_SENTINEL"));
-        when(syncClient.send(any())).thenReturn(SyncOutcome.SERVER_ERROR);
+        when(syncClient.send(any(), eq("permissionsync:glpi")))
+                .thenReturn(SyncOutcome.SERVER_ERROR);
 
         authenticator(CONFIGURED).authenticate(context);
 
@@ -265,14 +302,15 @@ class LoginSyncAuthenticatorTest {
     private void givenFlow(String flowPath, UserModel user) {
         when(context.getFlowPath()).thenReturn(flowPath);
         when(context.getUser()).thenReturn(user);
-        when(client.getClientId()).thenReturn("internal-portal");
         when(context.getAuthenticationSession().getClient()).thenReturn(client);
+        when(client.getClientId()).thenReturn("glpi");
     }
 
     private void assertSkippedWithoutSync() {
         verify(context).success();
         verify(context, never()).attempted();
-        verify(syncClient, never()).send(any());
+        verify(context, never()).failure(any(), any(), any(), any());
+        verify(syncClient, never()).send(any(), any());
     }
 
     private void assertLoginBlocked() {

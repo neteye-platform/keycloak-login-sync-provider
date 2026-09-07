@@ -16,7 +16,7 @@ package com.wuerthit.keycloak.authenticators.loginsync;
  */
 public enum SyncOutcome {
 
-    /** The receiver accepted the sync: HTTP 200 or 201. */
+    /** The receiver accepted the sync: HTTP 200 (changed) or 204 (already in the desired state). */
     SUCCESS(false),
 
     /** The receiver rejected the request: a 4xx other than 401 or 403. */

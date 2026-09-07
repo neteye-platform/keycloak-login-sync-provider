@@ -65,6 +65,11 @@ Upgrading from an earlier version is a breaking configuration change: append
 the receiver path to an existing base-only `service-endpoint`. The provider now
 posts to the configured URL verbatim, consistently with `sa-token-endpoint`.
 
+There is no setting for the PermissionSync target. The target is derived at
+runtime from the client the user logs in to, so the list above is complete and
+no key was added for it. Do not go looking for one. What the target does require
+is provisioning on the service-account client; see the deployment section.
+
 ## Deployment
 
 The `login-sync` execution MUST be a top-level **REQUIRED** execution in the
@@ -80,17 +85,60 @@ The plugin needs a dedicated confidential client with a service account.
 Provisioning that client is out of scope for this repository. The compose
 stack carries configuration only and provisions no realm, client, or role.
 
-The exact least-privilege role name, the claim carrying it, and the audience
-are open integration decisions that must be finalized before real deployment.
-See "Open integration decisions" in
+Authorization is decided by PermissionSync ADR-0002: the service-account token
+must carry exactly one `permissionsync:<target>` scope, the PermissionSync
+audience, and a `client_id` claim. Provisioning that scope and audience on the
+service account is an operator task outside this repository. See
 [the sync contract](docs/SYNC-CONTRACT.md).
+
+The plugin derives the target from the client the user is logging in to and
+requests it explicitly. It sends `scope=permissionsync:<login client id>` as a
+form parameter on the `application/x-www-form-urlencoded` Client Credentials
+request to `sa-token-endpoint`; the issued JWT then carries that scope, and the
+receiver routes and authorizes on it. For a brokered login the post-broker-login
+flow does not replace the authentication session's client, so the target is the
+original initiating login client, not the identity-provider client.
+
+For every target an instance serves, the operator MUST provision on the
+service-account client:
+
+- a client scope named `permissionsync:<clientId>`, assigned as **Optional**
+  and explicitly **not** Default, and
+- the PermissionSync audience.
+
+Optional is not a stylistic choice. A Default client scope is applied
+unconditionally to every token the client obtains, so a service account serving
+two targets would emit two `permissionsync:*` scopes in one token. ADR-0002
+requires exactly one, and the contract's answer to more than one is `403`. An
+Optional scope is only included when it is requested, which is what the plugin
+does. The failure in the other direction is quieter: if a requested scope is not
+assigned to the service-account client at all, Keycloak omits it from the token
+without an error, and the receiver is left with zero `permissionsync:` scopes
+and must answer `403`.
+
+Using the login client's `clientId` as the target identifier is safe only within
+a single trust domain. The provider and its service account are restricted to
+the intended realm, and that restriction is what makes the identifier
+unambiguous. Two unrelated realms can each hold a client named `glpi`, so a
+deployment must not be stretched across trust domains on the assumption that the
+name alone identifies a target.
+
+The body is unchanged at exactly three fields, `event_type`, `username` and
+`groups`, as fixed by PermissionSync ADR-0001. The target travels only in the
+JWT scope and never appears in the body.
 
 Deploy the built JAR into `/opt/keycloak/providers`.
 
 ## Limitations
 
 - The service-account token cache is per-JVM, therefore per-node in a cluster,
-  and is shared across all realms for one service endpoint.
+  and is keyed per scope. There is one cached token per
+  `permissionsync:<target>`, so two target clients never share a token.
+- While the scope provisioning is wrong, a `403` evicts that scope's cached
+  token, so the next login fetches a fresh one. Logins for that target then
+  refetch a token every time until an operator fixes the provisioning. That is
+  deliberate: it surfaces the misconfiguration instead of caching a token that
+  cannot work.
 - There is no retry and no buffering. A single timeout or 5xx response fails
   that login.
 - Synchronization is fail-closed: a receiver failure blocks the login. This is
@@ -98,10 +146,11 @@ Deploy the built JAR into `/opt/keycloak/providers`.
 - Only LOGIN is supported. REGISTER and UPDATE_PROFILE are out of scope.
 - The receiver ownership, authorization details, and wider integration contract
   remain undecided, so the version remains `0.x`.
-- The payload has no event, request, correlation, or idempotency identifier.
-  Its timestamp is truncated to seconds, so delivery is at-most-once. The
-  receiver cannot deduplicate on payload equality, and Keycloak-side and
-  receiver-side logs cannot be reliably correlated during an incident.
+- The payload carries only `event_type`, `username` and `groups` (PermissionSync
+  ADR-0001) and has no event, request, correlation, or idempotency identifier,
+  so delivery is at-most-once. The receiver cannot deduplicate on payload
+  equality, and Keycloak-side and receiver-side logs cannot be reliably
+  correlated during an incident.
 
 ## Layout
 

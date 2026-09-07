@@ -12,7 +12,6 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.EnumSet;
@@ -31,13 +30,12 @@ import org.junit.jupiter.api.Timeout;
 @Timeout(15)
 class SyncClientTest {
     private static final String SYNC_PATH = "/api/sync-user";
+    private static final String TEST_SCOPE = "permissionsync:glpi";
     private static final String TOKEN_SENTINEL = "TOKEN_SENTINEL";
     private static final String SECRET_SENTINEL = "SECRET_SENTINEL";
     private static final String EXPECTED_BODY =
-            "{\"event_type\":\"LOGIN\",\"client_id\":\"internal-portal\","
-                    + "\"username\":\"jdoe\",\"email\":\"jdoe@example.com\","
-                    + "\"groups\":[\"/staff\",\"/staff/engineering\"],"
-                    + "\"timestamp\":\"2026-08-24T09:15:32Z\"}";
+            "{\"event_type\":\"LOGIN\",\"username\":\"jdoe\","
+                    + "\"groups\":[\"/staff\",\"/staff/engineering\"]}";
 
     private final List<SyncClient> clients = new ArrayList<>();
     private final List<ExecutorService> executors = new ArrayList<>();
@@ -91,20 +89,20 @@ class SyncClientTest {
         SyncClient client =
                 client(new StubTokenProvider(config(), new TokenHandle(TOKEN_SENTINEL, 1)));
 
-        SyncOutcome outcome = client.send(payload());
+        SyncOutcome outcome = client.send(payload(), TEST_SCOPE);
 
         assertSame(SyncOutcome.SUCCESS, outcome);
         assertRequestCount(requestCount, 1);
     }
 
     @Test
-    void returnsSuccessFor201() throws Exception {
+    void returnsSuccessFor204() throws Exception {
         AtomicInteger requestCount = new AtomicInteger();
-        startSyncServer(requestCount, new StubResponse(201, 0));
+        startSyncServer(requestCount, new StubResponse(204, 0));
         SyncClient client =
                 client(new StubTokenProvider(config(), new TokenHandle(TOKEN_SENTINEL, 1)));
 
-        SyncOutcome outcome = client.send(payload());
+        SyncOutcome outcome = client.send(payload(), TEST_SCOPE);
 
         assertSame(SyncOutcome.SUCCESS, outcome);
         assertRequestCount(requestCount, 1);
@@ -117,7 +115,7 @@ class SyncClientTest {
         SyncClient client =
                 client(new StubTokenProvider(config(), new TokenHandle(TOKEN_SENTINEL, 1)));
 
-        SyncOutcome outcome = client.send(payload());
+        SyncOutcome outcome = client.send(payload(), TEST_SCOPE);
 
         assertSame(SyncOutcome.REJECTED, outcome);
         assertRequestCount(requestCount, 1);
@@ -131,11 +129,12 @@ class SyncClientTest {
         StubTokenProvider tokenProvider = new StubTokenProvider(config(), usedHandle);
         SyncClient client = client(tokenProvider);
 
-        SyncOutcome outcome = client.send(payload());
+        SyncOutcome outcome = client.send(payload(), TEST_SCOPE);
 
         assertSame(SyncOutcome.UNAUTHORIZED, outcome);
         assertRequestCount(requestCount, 1);
         assertEquals(1, tokenProvider.invalidationCount());
+        assertEquals(TEST_SCOPE, tokenProvider.invalidatedScope());
         assertSame(usedHandle, tokenProvider.invalidatedHandle());
         assertEquals(41, tokenProvider.invalidatedHandle().generation());
     }
@@ -148,11 +147,12 @@ class SyncClientTest {
         StubTokenProvider tokenProvider = new StubTokenProvider(config(), usedHandle);
         SyncClient client = client(tokenProvider);
 
-        SyncOutcome outcome = client.send(payload());
+        SyncOutcome outcome = client.send(payload(), TEST_SCOPE);
 
         assertSame(SyncOutcome.UNAUTHORIZED, outcome);
         assertRequestCount(requestCount, 1);
         assertEquals(1, tokenProvider.invalidationCount());
+        assertEquals(TEST_SCOPE, tokenProvider.invalidatedScope());
         assertSame(usedHandle, tokenProvider.invalidatedHandle());
         assertEquals(43, tokenProvider.invalidatedHandle().generation());
     }
@@ -164,7 +164,7 @@ class SyncClientTest {
         SyncClient client =
                 client(new StubTokenProvider(config(), new TokenHandle(TOKEN_SENTINEL, 1)));
 
-        SyncOutcome outcome = client.send(payload());
+        SyncOutcome outcome = client.send(payload(), TEST_SCOPE);
 
         assertSame(SyncOutcome.SERVER_ERROR, outcome);
         assertRequestCount(requestCount, 1);
@@ -179,7 +179,7 @@ class SyncClientTest {
         SyncClient client =
                 register(new FaultyOneRetrySyncClient(config(), new ObjectMapper(), tokenProvider));
 
-        SyncOutcome outcome = client.send(payload());
+        SyncOutcome outcome = client.send(payload(), TEST_SCOPE);
 
         assertSame(SyncOutcome.SERVER_ERROR, outcome);
         assertRequestCount(requestCount, 2);
@@ -195,7 +195,7 @@ class SyncClientTest {
                         timeoutConfig,
                         new StubTokenProvider(timeoutConfig, new TokenHandle(TOKEN_SENTINEL, 1)));
 
-        SyncOutcome outcome = client.send(payload());
+        SyncOutcome outcome = client.send(payload(), TEST_SCOPE);
 
         assertSame(SyncOutcome.TIMEOUT, outcome);
         assertRequestCount(requestCount, 1);
@@ -210,7 +210,7 @@ class SyncClientTest {
         SyncClient client =
                 register(new SyncClient(config(), new ObjectMapper(), null, 0, tokenProvider));
 
-        SyncOutcome outcome = client.send(payload());
+        SyncOutcome outcome = client.send(payload(), TEST_SCOPE);
 
         assertSame(SyncOutcome.SATURATED, outcome);
         assertRequestCount(requestCount, 0);
@@ -238,7 +238,7 @@ class SyncClientTest {
         SyncClient client =
                 client(new StubTokenProvider(config(), new TokenHandle(TOKEN_SENTINEL, 7)));
 
-        SyncOutcome outcome = client.send(payload());
+        SyncOutcome outcome = client.send(payload(), TEST_SCOPE);
 
         assertSame(SyncOutcome.SUCCESS, outcome);
         assertEquals("Bearer " + TOKEN_SENTINEL, authorization.get());
@@ -265,7 +265,7 @@ class SyncClientTest {
                         customConfig,
                         new StubTokenProvider(customConfig, new TokenHandle(TOKEN_SENTINEL, 1)));
 
-        SyncOutcome outcome = client.send(payload());
+        SyncOutcome outcome = client.send(payload(), TEST_SCOPE);
 
         assertSame(SyncOutcome.SUCCESS, outcome);
         assertEquals(customPath, requestPath.get());
@@ -303,7 +303,7 @@ class SyncClientTest {
         ExecutorService caller = register(Executors.newSingleThreadExecutor());
 
         CompletableFuture<SyncOutcome> outcome =
-                CompletableFuture.supplyAsync(() -> client.send(payload()), caller);
+                CompletableFuture.supplyAsync(() -> client.send(payload(), TEST_SCOPE), caller);
         try {
             assertTrue(tokenRequestStarted.await(3, TimeUnit.SECONDS));
             assertEquals(fullPermitCount, client.availablePermits());
@@ -422,12 +422,7 @@ class SyncClientTest {
     }
 
     private static SyncPayload payload() {
-        return SyncPayload.login(
-                "internal-portal",
-                "jdoe",
-                "jdoe@example.com",
-                List.of("/staff/engineering", "/staff"),
-                Instant.parse("2026-08-24T09:15:32Z"));
+        return SyncPayload.login("jdoe", List.of("/staff/engineering", "/staff"));
     }
 
     private static void assertRequestCount(AtomicInteger counter, int expected) {
@@ -449,6 +444,7 @@ class SyncClientTest {
         private final TokenHandle handle;
         private final AtomicInteger acquisitions = new AtomicInteger();
         private final AtomicInteger invalidations = new AtomicInteger();
+        private final AtomicReference<String> invalidatedScope = new AtomicReference<>();
         private final AtomicReference<TokenHandle> invalidatedHandle = new AtomicReference<>();
 
         private StubTokenProvider(LoginSyncConfig config, TokenHandle handle) {
@@ -457,14 +453,15 @@ class SyncClientTest {
         }
 
         @Override
-        public TokenHandle acquire() {
+        public TokenHandle acquire(String scope) {
             acquisitions.incrementAndGet();
             return handle;
         }
 
         @Override
-        public void invalidateIfCurrent(TokenHandle usedHandle) {
+        public void invalidateIfCurrent(String scope, TokenHandle usedHandle) {
             invalidations.incrementAndGet();
+            invalidatedScope.set(scope);
             invalidatedHandle.set(usedHandle);
         }
 
@@ -474,6 +471,10 @@ class SyncClientTest {
 
         private int invalidationCount() {
             return invalidations.get();
+        }
+
+        private String invalidatedScope() {
+            return invalidatedScope.get();
         }
 
         private TokenHandle invalidatedHandle() {
@@ -491,9 +492,11 @@ class SyncClientTest {
         }
 
         @Override
-        public SyncOutcome send(SyncPayload payload) {
-            SyncOutcome firstAttempt = super.send(payload);
-            return firstAttempt == SyncOutcome.SERVER_ERROR ? super.send(payload) : firstAttempt;
+        public SyncOutcome send(SyncPayload payload, String scope) {
+            SyncOutcome firstAttempt = super.send(payload, scope);
+            return firstAttempt == SyncOutcome.SERVER_ERROR
+                    ? super.send(payload, scope)
+                    : firstAttempt;
         }
     }
 }

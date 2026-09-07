@@ -30,6 +30,12 @@ public final class LoginSyncConstants {
     /** Bounds for plan 0004's bounded token fetch. */
     public static final int DEFAULT_CONNECT_TIMEOUT_MS = 2000;
 
+    /**
+     * OAuth2 scope prefix for PermissionSync; the login client's {@code clientId} is appended
+     * (PermissionSync ADR-0002).
+     */
+    public static final String PERMISSIONSYNC_SCOPE_PREFIX = "permissionsync:";
+
     public static final String EVENT_TYPE_LOGIN = "LOGIN";
 
     private LoginSyncConstants() {

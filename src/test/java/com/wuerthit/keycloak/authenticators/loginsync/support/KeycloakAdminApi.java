@@ -122,6 +122,56 @@ public class KeycloakAdminApi {
         return postForId(realmPath(realm) + "/clients", client);
     }
 
+    public String createClientScope(String realm, String name)
+            throws IOException, InterruptedException {
+        Map<String, Object> attributes =
+                Map.of(
+                        "include.in.token.scope", "true",
+                        "display.on.consent.screen", "false");
+        return postForId(
+                realmPath(realm) + "/client-scopes",
+                Map.of("name", name, "protocol", "openid-connect", "attributes", attributes));
+    }
+
+    public void addOptionalClientScopeToClient(String realm, String clientId, String scopeName)
+            throws IOException, InterruptedException {
+        String clientUuid = requireClientUuid(realm, clientId);
+        String scopeId = requireClientScopeId(realm, scopeName);
+        put(
+                realmPath(realm)
+                        + "/clients/"
+                        + pathSegment(clientUuid)
+                        + "/optional-client-scopes/"
+                        + pathSegment(scopeId),
+                null);
+    }
+
+    public void addAudienceMapper(
+            String realm, String clientId, String mapperName, String includedClientAudience)
+            throws IOException, InterruptedException {
+        String clientUuid = requireClientUuid(realm, clientId);
+        Map<String, String> config =
+                Map.of(
+                        "included.client.audience", includedClientAudience,
+                        "access.token.claim", "true",
+                        "id.token.claim", "false",
+                        "introspection.token.claim", "true");
+        post(
+                realmPath(realm)
+                        + "/clients/"
+                        + pathSegment(clientUuid)
+                        + "/protocol-mappers/models",
+                Map.of(
+                        "name",
+                        mapperName,
+                        "protocol",
+                        "openid-connect",
+                        "protocolMapper",
+                        "oidc-audience-mapper",
+                        "config",
+                        config));
+    }
+
     /**
      * Creates the confidential service-account client used by the provider and returns both values
      * that the provider configuration needs.
@@ -331,6 +381,16 @@ public class KeycloakAdminApi {
         return clients.isEmpty() ? null : requiredText(clients.get(0), "id", "client " + clientId);
     }
 
+    private String findClientScopeId(String realm, String scopeName)
+            throws IOException, InterruptedException {
+        for (JsonNode scope : get(realmPath(realm) + "/client-scopes")) {
+            if (scopeName.equals(scope.path("name").asText())) {
+                return requiredText(scope, "id", "client scope " + scopeName);
+            }
+        }
+        return null;
+    }
+
     private String accessToken() throws IOException, InterruptedException {
         // This password grant obtains only the admin-cli fixture token. BrowserLogin never uses a
         // direct grant because that would bypass the authenticator under test.
@@ -427,6 +487,15 @@ public class KeycloakAdminApi {
             throw new IOException("No client named " + clientId + " in realm " + realm);
         }
         return clientUuid;
+    }
+
+    private String requireClientScopeId(String realm, String scopeName)
+            throws IOException, InterruptedException {
+        String scopeId = findClientScopeId(realm, scopeName);
+        if (scopeId == null) {
+            throw new IOException("No client scope named " + scopeName + " in realm " + realm);
+        }
+        return scopeId;
     }
 
     private String findGroupIdByPath(String realm, String groupPath)

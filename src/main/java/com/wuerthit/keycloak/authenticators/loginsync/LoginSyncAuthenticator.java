@@ -1,7 +1,6 @@
 package com.wuerthit.keycloak.authenticators.loginsync;
 
 import jakarta.ws.rs.core.Response;
-import java.time.Instant;
 import java.util.List;
 import org.jboss.logging.Logger;
 import org.keycloak.authentication.AuthenticationFlowContext;
@@ -97,19 +96,23 @@ public class LoginSyncAuthenticator implements Authenticator {
             return;
         }
 
+        String clientId = client.getClientId();
+        if (clientId == null || clientId.isBlank()) {
+            // Defence-in-depth ONLY: Keycloak enforces a non-empty clientId on a real login
+            // client, so this branch is unreachable in normal operation and is not a live bypass.
+            LOG.debug("Skipping login sync because the login client has no usable client id");
+            context.success();
+            return;
+        }
+        String scope = LoginSyncConstants.PERMISSIONSYNC_SCOPE_PREFIX + clientId;
+
         // Collected inside the session and before the HTTP call, so no model is touched once the
         // request is in flight.
         List<String> groups =
                 user.getGroupsStream().map(KeycloakModelUtils::buildGroupPath).toList();
-        SyncPayload payload =
-                SyncPayload.login(
-                        client.getClientId(),
-                        user.getUsername(),
-                        user.getEmail(),
-                        groups,
-                        Instant.now());
+        SyncPayload payload = SyncPayload.login(user.getUsername(), groups);
 
-        SyncOutcome outcome = sendOnce(payload);
+        SyncOutcome outcome = sendOnce(payload, scope);
         if (!outcome.blocksLogin()) {
             LOG.debugf("Login sync permitted the login with outcome %s", outcome);
             context.success();
@@ -129,17 +132,18 @@ public class LoginSyncAuthenticator implements Authenticator {
     /**
      * Performs the single synchronization attempt.
      *
-     * <p>Exactly one call to {@link SyncClient#send(SyncPayload)} is made per login: retry was
-     * removed by the LLD (section 3.7, recorded as {@code R-01}), so no failure is ever repeated
-     * within one login. An absent outcome is treated as a transport failure, which blocks the
-     * login.
+     * <p>Exactly one call to {@link SyncClient#send(SyncPayload, String)} is made per login: retry
+     * was removed by the LLD (section 3.7, recorded as {@code R-01}), so no failure is ever
+     * repeated within one login. An absent outcome is treated as a transport failure, which blocks
+     * the login.
      *
      * @param payload the body to deliver
+     * @param scope the target-specific OAuth2 scope
      * @return the outcome that decides the login verdict, never {@code null}
      */
-    private SyncOutcome sendOnce(SyncPayload payload) {
+    private SyncOutcome sendOnce(SyncPayload payload, String scope) {
         try {
-            SyncOutcome outcome = syncClient.send(payload);
+            SyncOutcome outcome = syncClient.send(payload, scope);
             return outcome == null ? SyncOutcome.TRANSPORT_ERROR : outcome;
         } catch (SyncFailedException exception) {
             return exception.outcome() == null ? SyncOutcome.TRANSPORT_ERROR : exception.outcome();

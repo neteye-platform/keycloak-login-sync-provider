@@ -29,14 +29,17 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterAll; // codespell:ignore afterall
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.ClassOrderer;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Nested;
@@ -64,6 +67,7 @@ class LoginSyncIT {
     private static final String SA_CLIENT_SECRET = "test-secret";
     private static final int SA_ACCESS_TOKEN_LIFESPAN_SECONDS = 1800;
     private static final String INTERNAL_SA_ISSUER = "http://localhost:8080/realms/" + SA_REALM;
+    private static final String PERMISSIONSYNC_AUDIENCE = "permissionsync";
 
     private static final String LOGIN_CLIENT_ID = "browser-login-client";
     private static final String USERNAME = "integration-user";
@@ -147,6 +151,9 @@ class LoginSyncIT {
     private void createServiceAccountRealm() throws Exception {
         admin.createRealm(SA_REALM, SA_ACCESS_TOKEN_LIFESPAN_SECONDS);
         admin.createConfidentialClientWithServiceAccount(SA_REALM, SA_CLIENT_ID, SA_CLIENT_SECRET);
+        String loginScope = LoginSyncConstants.PERMISSIONSYNC_SCOPE_PREFIX + LOGIN_CLIENT_ID;
+        admin.createClientScope(SA_REALM, loginScope);
+        admin.addOptionalClientScopeToClient(SA_REALM, SA_CLIENT_ID, loginScope);
     }
 
     @AfterAll // codespell:ignore afterall
@@ -226,10 +233,8 @@ class LoginSyncIT {
         void acceptedSyncSendsExactPayloadAndAKeycloakIssuedToken() throws Exception {
             mock.setMode(MockSyncService.Mode.OK);
             mock.reset();
-            Instant startedAt = Instant.now();
 
             Result result = login(REALM);
-            Instant completedAt = Instant.now();
 
             assertTrue(result.succeeded(), "A 200 sync response must permit the browser login");
             assertNotNull(result.code(), "A successful browser login must return a code");
@@ -237,7 +242,7 @@ class LoginSyncIT {
             CapturedRequest request = mock.requests().getFirst();
             assertEquals("POST", request.method());
             assertEquals("/api/sync-user", request.path());
-            assertExactPayload(request.body(), startedAt, completedAt);
+            assertExactPayload(request.body());
 
             RedactedToken token = bearerToken(request);
             verifyJwt(token.value(), INTERNAL_SA_ISSUER);
@@ -245,14 +250,15 @@ class LoginSyncIT {
 
         @Test
         @Order(2)
-        void createdSyncResponsePermitsLogin() throws Exception {
-            mock.setMode(MockSyncService.Mode.CREATED);
+        void noContentResponsePermitsLogin() throws Exception {
+            mock.setMode(MockSyncService.Mode.NO_CONTENT);
             mock.reset();
 
             Result result = login(REALM);
 
-            assertTrue(result.succeeded(), "A 201 sync response must permit the browser login");
-            assertEquals(1, mock.requests().size(), "A created sync must make one request");
+            assertTrue(result.succeeded(), "A 204 sync response must permit the browser login");
+            assertEquals(
+                    1, mock.requests().size(), "An unchanged sync must still make one request");
         }
 
         @Test
@@ -447,9 +453,75 @@ class LoginSyncIT {
         }
     }
 
+    @Nested
+    @Order(5)
+    @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+    @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+    class ScopeTargetScenarios {
+
+        private static final String REALM = "login-sync-scope-target";
+        private static final String GLPI_CLIENT_ID = "glpi";
+        private static final String GRAFANA_CLIENT_ID = "grafana";
+        private static final String GLPI_SCOPE = "permissionsync:" + GLPI_CLIENT_ID;
+        private static final String GRAFANA_SCOPE = "permissionsync:" + GRAFANA_CLIENT_ID;
+
+        @BeforeAll
+        void createRealm() throws Exception {
+            createLoginRealm(REALM, List.of(GLPI_CLIENT_ID, GRAFANA_CLIENT_ID));
+            admin.createClientScope(SA_REALM, GLPI_SCOPE);
+            admin.createClientScope(SA_REALM, GRAFANA_SCOPE);
+            admin.addOptionalClientScopeToClient(SA_REALM, SA_CLIENT_ID, GLPI_SCOPE);
+            admin.addOptionalClientScopeToClient(SA_REALM, SA_CLIENT_ID, GRAFANA_SCOPE);
+            admin.addAudienceMapper(
+                    SA_REALM, SA_CLIENT_ID, "PermissionSync audience", PERMISSIONSYNC_AUDIENCE);
+        }
+
+        @AfterAll // codespell:ignore afterall
+        void deleteRealm() throws Exception {
+            admin.deleteRealm(REALM);
+        }
+
+        @BeforeEach
+        void resetMock() {
+            mock.setMode(MockSyncService.Mode.OK);
+            mock.reset();
+        }
+
+        @Test
+        @Order(1)
+        void targetScopeAndTokenCacheAreIsolatedPerLoginClient() throws Exception {
+            Result glpiLogin = browser.login(REALM, GLPI_CLIENT_ID, USERNAME, PASSWORD);
+
+            assertTrue(glpiLogin.succeeded(), "The glpi browser login must succeed");
+            assertEquals(1, mock.requests().size(), "The glpi login must make one sync request");
+            RedactedToken glpiToken = bearerToken(mock.requests().getFirst());
+            JsonNode glpiClaims = verifyJwt(glpiToken.value(), INTERNAL_SA_ISSUER);
+            assertTargetClaims(glpiClaims, GLPI_SCOPE);
+
+            mock.reset();
+            Result grafanaLogin = browser.login(REALM, GRAFANA_CLIENT_ID, USERNAME, PASSWORD);
+
+            assertTrue(grafanaLogin.succeeded(), "The grafana browser login must succeed");
+            assertEquals(1, mock.requests().size(), "The grafana login must make one sync request");
+            RedactedToken grafanaToken = bearerToken(mock.requests().getFirst());
+            JsonNode grafanaClaims = verifyJwt(grafanaToken.value(), INTERNAL_SA_ISSUER);
+            assertTargetClaims(grafanaClaims, GRAFANA_SCOPE);
+            assertNotEquals(
+                    glpiToken,
+                    grafanaToken,
+                    "Different target scopes must use distinct cached token generations");
+        }
+    }
+
     private void createLoginRealm(String realm) throws Exception {
+        createLoginRealm(realm, List.of(LOGIN_CLIENT_ID));
+    }
+
+    private void createLoginRealm(String realm, List<String> loginClientIds) throws Exception {
         admin.createRealm(realm);
-        admin.createPublicClient(realm, LOGIN_CLIENT_ID, BrowserLogin.REDIRECT_URI);
+        for (String loginClientId : loginClientIds) {
+            admin.createPublicClient(realm, loginClientId, BrowserLogin.REDIRECT_URI);
+        }
         admin.createUser(realm, USERNAME, EMAIL, PASSWORD);
         for (String group : EXPECTED_GROUPS) {
             admin.createGroup(realm, group);
@@ -533,28 +605,19 @@ class LoginSyncIT {
                 result.body().contains("code="), "A blocked login must not redirect with code=");
     }
 
-    private static void assertExactPayload(String body, Instant startedAt, Instant completedAt)
-            throws Exception {
+    private static void assertExactPayload(String body) throws Exception {
         JsonNode actual = JSON.readTree(body);
         assertEquals(
-                List.of("event_type", "client_id", "username", "email", "groups", "timestamp"),
+                List.of("event_type", "username", "groups"),
                 actual.propertyStream().map(java.util.Map.Entry::getKey).toList(),
-                "The sync payload must contain exactly the six contract fields in order");
-
-        Instant timestamp = Instant.parse(actual.path("timestamp").asText());
-        assertEquals(0, timestamp.getNano(), "The payload timestamp must be truncated to seconds");
-        assertFalse(timestamp.isBefore(startedAt.minusSeconds(1)), "Timestamp predates the login");
-        assertFalse(timestamp.isAfter(completedAt), "Timestamp follows login completion");
+                "The sync payload must contain exactly the three contract fields in order");
 
         ObjectNode expected = JSON.createObjectNode();
         expected.put("event_type", "LOGIN");
-        expected.put("client_id", LOGIN_CLIENT_ID);
         expected.put("username", USERNAME);
-        expected.put("email", EMAIL);
         for (String group : EXPECTED_GROUPS) {
             expected.withArray("groups").add(group);
         }
-        expected.put("timestamp", actual.path("timestamp").asText());
         assertEquals(expected, actual, "The sync payload must exactly match the login context");
     }
 
@@ -567,7 +630,7 @@ class LoginSyncIT {
         return new RedactedToken(authorization.substring("Bearer ".length()));
     }
 
-    private void verifyJwt(String token, String expectedIssuer) throws Exception {
+    private JsonNode verifyJwt(String token, String expectedIssuer) throws Exception {
         String[] parts = token.split("\\.", -1);
         assertEquals(3, parts.length, "The service-account credential must be a compact JWT");
         JsonNode header = JSON.readTree(BASE64_URL.decode(parts[0]));
@@ -615,6 +678,36 @@ class LoginSyncIT {
                 expectedIssuer,
                 claims.path("iss").asText(),
                 "The service-account JWT must have the expected issuer");
+        return claims;
+    }
+
+    private static void assertTargetClaims(JsonNode claims, String expectedScope) {
+        Set<String> targetScopes =
+                Pattern.compile("\\s+")
+                        .splitAsStream(claims.path("scope").asText())
+                        .filter(
+                                scope ->
+                                        scope.startsWith(
+                                                LoginSyncConstants.PERMISSIONSYNC_SCOPE_PREFIX))
+                        .collect(Collectors.toUnmodifiableSet());
+        assertEquals(
+                Set.of(expectedScope),
+                targetScopes,
+                "The token must contain exactly the requested PermissionSync scope");
+        assertEquals(1, targetScopes.size(), "The token must contain one PermissionSync scope");
+        assertEquals(
+                SA_CLIENT_ID,
+                claims.path("client_id").asText(),
+                "The token must identify the service-account client");
+        assertTrue(
+                claims.path("aud").isTextual()
+                        ? PERMISSIONSYNC_AUDIENCE.equals(claims.path("aud").asText())
+                        : claims.path("aud")
+                                .valueStream()
+                                .anyMatch(
+                                        audience ->
+                                                PERMISSIONSYNC_AUDIENCE.equals(audience.asText())),
+                "The token must contain the PermissionSync audience");
     }
 
     private void awaitRequestCount(int expected, Duration timeout) throws InterruptedException {

@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -19,88 +18,29 @@ class SyncPayloadTest {
 
     @Test
     void serializesTheExactWireContract() throws Exception {
-        SyncPayload payload =
-                SyncPayload.login(
-                        "internal-portal",
-                        "jdoe",
-                        "jdoe@example.com",
-                        List.of("/staff/engineering", "/staff"),
-                        Instant.parse("2026-08-24T09:15:32Z"));
+        SyncPayload payload = SyncPayload.login("jdoe", List.of("/staff/engineering", "/staff"));
 
         String json = OBJECT_MAPPER.writeValueAsString(payload);
 
         assertEquals(
-                "{\"event_type\":\"LOGIN\",\"client_id\":\"internal-portal\",\"username\":\"jdoe\",\"email\":\"jdoe@example.com\",\"groups\":[\"/staff\",\"/staff/engineering\"],\"timestamp\":\"2026-08-24T09:15:32Z\"}",
+                "{\"event_type\":\"LOGIN\",\"username\":\"jdoe\",\"groups\":[\"/staff\",\"/staff/engineering\"]}",
                 json);
     }
 
     @Test
-    void serializesOnlyTheSixContractFieldsInOrder() throws Exception {
-        SyncPayload payload =
-                SyncPayload.login(
-                        "internal-portal",
-                        "jdoe",
-                        "jdoe@example.com",
-                        List.of("/staff"),
-                        Instant.parse("2026-08-24T09:15:32Z"));
+    void serializesOnlyTheThreeContractFieldsInOrder() throws Exception {
+        SyncPayload payload = SyncPayload.login("jdoe", List.of("/staff"));
 
         JsonNode json = OBJECT_MAPPER.readTree(OBJECT_MAPPER.writeValueAsString(payload));
         List<String> fields = new ArrayList<>();
         json.fieldNames().forEachRemaining(fields::add);
 
-        assertEquals(
-                List.of("event_type", "client_id", "username", "email", "groups", "timestamp"),
-                fields);
-    }
-
-    @Test
-    void truncatesTimestampToWholeSeconds() throws Exception {
-        SyncPayload payload =
-                SyncPayload.login(
-                        "internal-portal",
-                        "jdoe",
-                        "jdoe@example.com",
-                        List.of(),
-                        Instant.parse("2026-08-24T09:15:32.987654321Z"));
-
-        String timestamp =
-                OBJECT_MAPPER
-                        .readTree(OBJECT_MAPPER.writeValueAsString(payload))
-                        .get("timestamp")
-                        .asText();
-
-        assertEquals("2026-08-24T09:15:32Z", timestamp);
-        assertTrue(timestamp.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"));
-    }
-
-    @Test
-    void canonicalConstructorTruncatesTimestampToWholeSeconds() throws Exception {
-        SyncPayload payload =
-                new SyncPayload(
-                        "internal-portal",
-                        "jdoe",
-                        "jdoe@example.com",
-                        List.of(),
-                        Instant.parse("2026-08-24T09:15:32.123456789Z").toString());
-
-        String timestamp =
-                OBJECT_MAPPER
-                        .readTree(OBJECT_MAPPER.writeValueAsString(payload))
-                        .get("timestamp")
-                        .asText();
-
-        assertEquals("2026-08-24T09:15:32Z", timestamp);
+        assertEquals(List.of("event_type", "username", "groups"), fields);
     }
 
     @Test
     void sortsGroupsOnTheWireAndDefensivelyMakesThemUnmodifiable() throws Exception {
-        SyncPayload payload =
-                SyncPayload.login(
-                        "internal-portal",
-                        "jdoe",
-                        "jdoe@example.com",
-                        List.of("/staff/engineering", "/staff"),
-                        Instant.parse("2026-08-24T09:15:32Z"));
+        SyncPayload payload = SyncPayload.login("jdoe", List.of("/staff/engineering", "/staff"));
 
         assertEquals(
                 "[\"/staff\",\"/staff/engineering\"]",
@@ -113,20 +53,8 @@ class SyncPayloadTest {
 
     @Test
     void serializesEmptyAndNullGroupsAsAnEmptyArray() throws Exception {
-        SyncPayload emptyGroups =
-                SyncPayload.login(
-                        "internal-portal",
-                        "jdoe",
-                        "jdoe@example.com",
-                        List.of(),
-                        Instant.parse("2026-08-24T09:15:32Z"));
-        SyncPayload nullGroups =
-                SyncPayload.login(
-                        "internal-portal",
-                        "jdoe",
-                        "jdoe@example.com",
-                        null,
-                        Instant.parse("2026-08-24T09:15:32Z"));
+        SyncPayload emptyGroups = SyncPayload.login("jdoe", List.of());
+        SyncPayload nullGroups = SyncPayload.login("jdoe", null);
 
         assertEquals(
                 "[]",
@@ -143,40 +71,18 @@ class SyncPayloadTest {
     }
 
     @Test
-    void serializesNullEmailAsPresentJsonNull() throws Exception {
-        SyncPayload payload =
-                SyncPayload.login(
-                        "internal-portal",
-                        "jdoe",
-                        null,
-                        List.of(),
-                        Instant.parse("2026-08-24T09:15:32Z"));
-
-        JsonNode json = OBJECT_MAPPER.readTree(OBJECT_MAPPER.writeValueAsString(payload));
-
-        assertTrue(json.has("email"));
-        assertTrue(json.get("email").isNull());
-    }
-
-    @Test
-    void redactsEmailAndGroupPathsFromToString() {
-        SyncPayload payload =
-                SyncPayload.login(
-                        "internal-portal",
-                        "jdoe",
-                        "jdoe@example.com",
-                        List.of("/staff/engineering"),
-                        Instant.parse("2026-08-24T09:15:32Z"));
+    void redactsGroupPathsFromToString() {
+        SyncPayload payload = SyncPayload.login("jdoe", List.of("/staff/engineering"));
 
         String rendered = payload.toString();
 
-        assertFalse(rendered.contains("jdoe@example.com"));
+        assertFalse(rendered.contains("jdoe"));
         assertFalse(rendered.contains("/staff/engineering"));
     }
 
     @Test
     void hasNoPublicNonLoginConstructionPath() throws Exception {
-        assertEquals(5, SyncPayload.class.getRecordComponents().length);
+        assertEquals(2, SyncPayload.class.getRecordComponents().length);
         assertTrue(
                 java.util.Arrays.stream(SyncPayload.class.getRecordComponents())
                         .noneMatch(
@@ -189,29 +95,15 @@ class SyncPayloadTest {
         for (java.lang.reflect.Constructor<?> constructor :
                 SyncPayload.class.getDeclaredConstructors()) {
             assertEquals(
-                    List.of(String.class, String.class, String.class, List.class, String.class),
-                    List.of(constructor.getParameterTypes()));
+                    List.of(String.class, List.class), List.of(constructor.getParameterTypes()));
         }
 
-        Method login =
-                SyncPayload.class.getDeclaredMethod(
-                        "login",
-                        String.class,
-                        String.class,
-                        String.class,
-                        List.class,
-                        Instant.class);
+        Method login = SyncPayload.class.getDeclaredMethod("login", String.class, List.class);
         assertTrue(Modifier.isPublic(login.getModifiers()));
         assertTrue(Modifier.isStatic(login.getModifiers()));
         assertEquals(SyncPayload.class, login.getReturnType());
-        assertEquals(3, countParametersOfType(login, String.class));
-        SyncPayload payload =
-                SyncPayload.login(
-                        "internal-portal",
-                        "jdoe",
-                        "jdoe@example.com",
-                        List.of(),
-                        Instant.parse("2026-08-24T09:15:32Z"));
+        assertEquals(1, countParametersOfType(login, String.class));
+        SyncPayload payload = SyncPayload.login("jdoe", List.of());
         assertEquals(LoginSyncConstants.EVENT_TYPE_LOGIN, payload.eventType());
         assertEquals(
                 LoginSyncConstants.EVENT_TYPE_LOGIN,
@@ -225,24 +117,18 @@ class SyncPayloadTest {
                     && Modifier.isStatic(method.getModifiers())
                     && method.getReturnType().equals(SyncPayload.class)) {
                 assertEquals("login", method.getName());
-                assertEquals(3, countParametersOfType(method, String.class));
+                assertEquals(1, countParametersOfType(method, String.class));
             }
         }
     }
 
     @Test
     void redactsSentinelValuesFromToString() {
-        SyncPayload payload =
-                SyncPayload.login(
-                        "internal-portal",
-                        "jdoe",
-                        "email@sentinel.test",
-                        List.of("/GROUP_SENTINEL"),
-                        Instant.parse("2026-08-24T09:15:32Z"));
+        SyncPayload payload = SyncPayload.login("jdoe", List.of("/GROUP_SENTINEL"));
 
         String rendered = payload.toString();
 
-        assertFalse(rendered.contains("email@sentinel.test"));
+        assertFalse(rendered.contains("jdoe"));
         assertFalse(rendered.contains("/GROUP_SENTINEL"));
     }
 

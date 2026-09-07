@@ -75,10 +75,17 @@ public class SyncClient implements AutoCloseable {
                         .build();
     }
 
-    public SyncOutcome send(SyncPayload payload) {
+    /**
+     * Sends a login-sync payload using the {@code permissionsync:<target>} OAuth2 scope.
+     *
+     * <p>The scope selects both the token cache slot and the PermissionSync routing target. It must
+     * be non-null and non-blank.
+     */
+    public SyncOutcome send(SyncPayload payload, String scope) {
+        Objects.requireNonNull(scope, "scope");
         TokenHandle handle;
         try {
-            handle = tokenProvider.acquire();
+            handle = tokenProvider.acquire(scope);
         } catch (SyncFailedException failure) {
             return failure.outcome();
         }
@@ -102,11 +109,13 @@ public class SyncClient implements AutoCloseable {
             HttpResponse<Void> response =
                     httpClient.send(request, HttpResponse.BodyHandlers.discarding());
             int statusCode = response.statusCode();
-            if (statusCode == 200 || statusCode == 201) {
+            // 200 (changed) and 204 (already in the desired state) are both success per the
+            // PermissionSync inbound contract (ADR-0001). 201 is not part of that contract.
+            if (statusCode == 200 || statusCode == 204) {
                 return SyncOutcome.SUCCESS;
             }
             if (statusCode == 401 || statusCode == 403) {
-                tokenProvider.invalidateIfCurrent(handle);
+                tokenProvider.invalidateIfCurrent(scope, handle);
                 return SyncOutcome.UNAUTHORIZED;
             }
             if (statusCode >= 400 && statusCode < 500) {
