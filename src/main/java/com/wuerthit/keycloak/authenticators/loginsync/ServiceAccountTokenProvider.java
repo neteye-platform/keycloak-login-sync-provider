@@ -74,7 +74,8 @@ public class ServiceAccountTokenProvider implements AutoCloseable {
     /**
      * Acquires a token for {@code scope}, isolated from every other scope's cache and refresh.
      *
-     * @param scope the non-blank OAuth2 scope to request
+     * @param scope the OAuth2 scope to request; {@code null} or blank means no scope is requested,
+     *     and is canonicalized to the empty-string cache key
      * @return a reusable or newly fetched token handle for that scope
      */
     public TokenHandle acquire(String scope) {
@@ -112,7 +113,8 @@ public class ServiceAccountTokenProvider implements AutoCloseable {
      *
      * <p>Tokens cached for other scopes are never inspected or evicted.
      *
-     * @param scope the non-blank OAuth2 scope whose token may be invalidated
+     * @param scope the OAuth2 scope whose token may be invalidated; {@code null} or blank means the
+     *     canonical empty-string cache key
      * @param handle the token handle to invalidate when its generation is current
      */
     public void invalidateIfCurrent(String scope, TokenHandle handle) {
@@ -167,7 +169,9 @@ public class ServiceAccountTokenProvider implements AutoCloseable {
                     HttpRequest.newBuilder(URI.create(config.saTokenEndpoint()))
                             .timeout(Duration.ofMillis(LoginSyncConstants.DEFAULT_TOKEN_TIMEOUT_MS))
                             .header("Content-Type", "application/x-www-form-urlencoded")
-                            .POST(HttpRequest.BodyPublishers.ofString(formBody(scope)))
+                            .POST(
+                                    HttpRequest.BodyPublishers.ofString(
+                                            formBody(validateScope(scope))))
                             .build();
             HttpResponse<String> response =
                     httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -206,14 +210,14 @@ public class ServiceAccountTokenProvider implements AutoCloseable {
     }
 
     private String formBody(String scope) {
-        return "grant_type="
-                + encode("client_credentials")
-                + "&client_id="
-                + encode(config.saClientId())
-                + "&client_secret="
-                + encode(config.saClientSecret())
-                + "&scope="
-                + encode(scope);
+        String body =
+                "grant_type="
+                        + encode("client_credentials")
+                        + "&client_id="
+                        + encode(config.saClientId())
+                        + "&client_secret="
+                        + encode(config.saClientSecret());
+        return scope.equals("") ? body : body + "&scope=" + encode(scope);
     }
 
     private ScopeSlot slotFor(String scope) {
@@ -222,11 +226,7 @@ public class ServiceAccountTokenProvider implements AutoCloseable {
     }
 
     private static String validateScope(String scope) {
-        Objects.requireNonNull(scope, "scope");
-        if (scope.isBlank()) {
-            throw new IllegalArgumentException("scope must not be blank");
-        }
-        return scope;
+        return scope == null || scope.isBlank() ? "" : scope;
     }
 
     private static String encode(String value) {

@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Timeout;
 class SyncClientTest {
     private static final String SYNC_PATH = "/api/sync-user";
     private static final String TEST_SCOPE = "permissionsync:glpi";
+    private static final String EMPTY_SCOPE = "";
     private static final String TOKEN_SENTINEL = "TOKEN_SENTINEL";
     private static final String SECRET_SENTINEL = "SECRET_SENTINEL";
     private static final String EXPECTED_BODY =
@@ -96,6 +97,32 @@ class SyncClientTest {
     }
 
     @Test
+    void sendSucceedsWithNullScope() throws Exception {
+        AtomicInteger requestCount = new AtomicInteger();
+        startSyncServer(requestCount, new StubResponse(200, 0));
+        SyncClient client =
+                client(new StubTokenProvider(config(), new TokenHandle(TOKEN_SENTINEL, 1)));
+
+        SyncOutcome outcome = client.send(payload(), null);
+
+        assertSame(SyncOutcome.SUCCESS, outcome);
+        assertRequestCount(requestCount, 1);
+    }
+
+    @Test
+    void sendSucceedsWithEmptyStringScope() throws Exception {
+        AtomicInteger requestCount = new AtomicInteger();
+        startSyncServer(requestCount, new StubResponse(200, 0));
+        SyncClient client =
+                client(new StubTokenProvider(config(), new TokenHandle(TOKEN_SENTINEL, 1)));
+
+        SyncOutcome outcome = client.send(payload(), EMPTY_SCOPE);
+
+        assertSame(SyncOutcome.SUCCESS, outcome);
+        assertRequestCount(requestCount, 1);
+    }
+
+    @Test
     void returnsSuccessFor204() throws Exception {
         AtomicInteger requestCount = new AtomicInteger();
         startSyncServer(requestCount, new StubResponse(204, 0));
@@ -135,6 +162,24 @@ class SyncClientTest {
         assertRequestCount(requestCount, 1);
         assertEquals(1, tokenProvider.invalidationCount());
         assertEquals(TEST_SCOPE, tokenProvider.invalidatedScope());
+        assertSame(usedHandle, tokenProvider.invalidatedHandle());
+        assertEquals(41, tokenProvider.invalidatedHandle().generation());
+    }
+
+    @Test
+    void emptyScopeUnauthorizedInvalidatesWithEmptyScopeKey() throws Exception {
+        AtomicInteger requestCount = new AtomicInteger();
+        startSyncServer(requestCount, new StubResponse(401, 0));
+        TokenHandle usedHandle = new TokenHandle(TOKEN_SENTINEL, 41);
+        StubTokenProvider tokenProvider = new StubTokenProvider(config(), usedHandle);
+        SyncClient client = client(tokenProvider);
+
+        SyncOutcome outcome = client.send(payload(), EMPTY_SCOPE);
+
+        assertSame(SyncOutcome.UNAUTHORIZED, outcome);
+        assertRequestCount(requestCount, 1);
+        assertEquals(1, tokenProvider.invalidationCount());
+        assertEquals(EMPTY_SCOPE, tokenProvider.invalidatedScope());
         assertSame(usedHandle, tokenProvider.invalidatedHandle());
         assertEquals(41, tokenProvider.invalidatedHandle().generation());
     }

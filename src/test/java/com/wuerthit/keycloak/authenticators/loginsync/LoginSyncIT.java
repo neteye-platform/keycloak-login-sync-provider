@@ -462,12 +462,16 @@ class LoginSyncIT {
         private static final String REALM = "login-sync-scope-target";
         private static final String GLPI_CLIENT_ID = "glpi";
         private static final String GRAFANA_CLIENT_ID = "grafana";
+        private static final String NO_TARGET_CLIENT_ID = "account-console-like";
         private static final String GLPI_SCOPE = "permissionsync:" + GLPI_CLIENT_ID;
         private static final String GRAFANA_SCOPE = "permissionsync:" + GRAFANA_CLIENT_ID;
 
         @BeforeAll
         void createRealm() throws Exception {
-            createLoginRealm(REALM, List.of(GLPI_CLIENT_ID, GRAFANA_CLIENT_ID));
+            createLoginRealm(
+                    REALM, List.of(GLPI_CLIENT_ID, GRAFANA_CLIENT_ID, NO_TARGET_CLIENT_ID));
+            admin.createClientScope(REALM, GLPI_SCOPE);
+            admin.createClientScope(REALM, GRAFANA_SCOPE);
             admin.createClientScope(SA_REALM, GLPI_SCOPE);
             admin.createClientScope(SA_REALM, GRAFANA_SCOPE);
             admin.addOptionalClientScopeToClient(SA_REALM, SA_CLIENT_ID, GLPI_SCOPE);
@@ -510,6 +514,19 @@ class LoginSyncIT {
                     glpiToken,
                     grafanaToken,
                     "Different target scopes must use distinct cached token generations");
+        }
+
+        @Test
+        @Order(2)
+        void loginWithoutRealmTargetScopeStillSynchronizesWithNoTargetClaim() throws Exception {
+            Result login = browser.login(REALM, NO_TARGET_CLIENT_ID, USERNAME, PASSWORD);
+
+            assertTrue(login.succeeded(), "The no-target browser login must succeed");
+            assertEquals(1, mock.requests().size(), "The login must make one sync request");
+            CapturedRequest request = mock.requests().getFirst();
+            JsonNode claims = verifyJwt(bearerToken(request).value(), INTERNAL_SA_ISSUER);
+            assertNoTargetClaim(claims);
+            assertExactPayload(request.body());
         }
     }
 
@@ -682,14 +699,7 @@ class LoginSyncIT {
     }
 
     private static void assertTargetClaims(JsonNode claims, String expectedScope) {
-        Set<String> targetScopes =
-                Pattern.compile("\\s+")
-                        .splitAsStream(claims.path("scope").asText())
-                        .filter(
-                                scope ->
-                                        scope.startsWith(
-                                                LoginSyncConstants.PERMISSIONSYNC_SCOPE_PREFIX))
-                        .collect(Collectors.toUnmodifiableSet());
+        Set<String> targetScopes = targetScopes(claims);
         assertEquals(
                 Set.of(expectedScope),
                 targetScopes,
@@ -708,6 +718,20 @@ class LoginSyncIT {
                                         audience ->
                                                 PERMISSIONSYNC_AUDIENCE.equals(audience.asText())),
                 "The token must contain the PermissionSync audience");
+    }
+
+    private static void assertNoTargetClaim(JsonNode claims) {
+        assertEquals(
+                Set.of(),
+                targetScopes(claims),
+                "The token must contain no PermissionSync target scope");
+    }
+
+    private static Set<String> targetScopes(JsonNode claims) {
+        return Pattern.compile("\\s+")
+                .splitAsStream(claims.path("scope").asText())
+                .filter(scope -> scope.startsWith(LoginSyncConstants.PERMISSIONSYNC_SCOPE_PREFIX))
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     private void awaitRequestCount(int expected, Duration timeout) throws InterruptedException {

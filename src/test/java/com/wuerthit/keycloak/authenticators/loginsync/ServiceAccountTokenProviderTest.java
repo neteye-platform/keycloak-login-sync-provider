@@ -62,6 +62,9 @@ class ServiceAccountTokenProviderTest {
     private static final String EXPECTED_FORM =
             "grant_type=client_credentials&client_id=client+id%2B%26"
                     + "&client_secret=secret+%2B%3D%26&scope=permissionsync%3Aglpi";
+    private static final String EXPECTED_SCOPELESS_FORM =
+            "grant_type=client_credentials&client_id=client+id%2B%26"
+                    + "&client_secret=secret+%2B%3D%26";
     private static final char[] TEST_KEY_PASSWORD = "changeit".toCharArray();
 
     // This throwaway self-signed PKCS12 exists only to serve loopback HTTPS in this test; it is not
@@ -160,6 +163,81 @@ class ServiceAccountTokenProviderTest {
         assertEquals("grafana-token", secondScope.token());
         assertSame(firstScope, provider.acquire(TEST_SCOPE));
         assertSame(secondScope, provider.acquire(OTHER_SCOPE));
+        assertEquals(2, requestCount.get());
+    }
+
+    @Test
+    void acceptsNullScopeAndCachesUnderEmptyKey() throws Exception {
+        AtomicInteger requestCount = new AtomicInteger();
+        startServer(
+                requestCount,
+                EXPECTED_SCOPELESS_FORM,
+                ignored -> tokenResponse("scopeless-token", 300));
+        ServiceAccountTokenProvider provider = provider(Clock.fixed(INITIAL_TIME, ZoneOffset.UTC));
+
+        TokenHandle nullScope = provider.acquire(null);
+
+        assertEquals("scopeless-token", nullScope.token());
+        assertSame(nullScope, provider.acquire(""));
+        assertEquals(1, requestCount.get());
+    }
+
+    @Test
+    void acceptsBlankScopeAndCachesUnderEmptyKey() throws Exception {
+        AtomicInteger requestCount = new AtomicInteger();
+        startServer(
+                requestCount,
+                EXPECTED_SCOPELESS_FORM,
+                ignored -> tokenResponse("scopeless-token", 300));
+        ServiceAccountTokenProvider provider = provider(Clock.fixed(INITIAL_TIME, ZoneOffset.UTC));
+
+        TokenHandle blankScope = provider.acquire(" \t");
+
+        assertEquals("scopeless-token", blankScope.token());
+        assertSame(blankScope, provider.acquire(""));
+        assertEquals(1, requestCount.get());
+    }
+
+    @Test
+    void formBodyOmitsScopeParameterWhenScopeIsEmpty() throws Exception {
+        AtomicInteger requestCount = new AtomicInteger();
+        AtomicReference<String> requestForm = new AtomicReference<>();
+        startServer(
+                requestCount,
+                (request, form) -> {
+                    requestForm.set(form);
+                    return tokenResponse("scopeless-token", 300);
+                });
+        ServiceAccountTokenProvider provider = provider(Clock.fixed(INITIAL_TIME, ZoneOffset.UTC));
+
+        provider.acquire("");
+
+        assertEquals(EXPECTED_SCOPELESS_FORM, requestForm.get());
+        assertFalse(requestForm.get().contains("&scope="));
+    }
+
+    @Test
+    void emptyScopeAndPopulatedScopeUseDistinctCacheSlots() throws Exception {
+        AtomicInteger requestCount = new AtomicInteger();
+        startServer(
+                requestCount,
+                (request, form) -> {
+                    if (form.equals(EXPECTED_SCOPELESS_FORM)) {
+                        return tokenResponse("scopeless-token", 300);
+                    }
+                    return tokenResponseForScope(request, form);
+                });
+        ServiceAccountTokenProvider provider = provider(Clock.fixed(INITIAL_TIME, ZoneOffset.UTC));
+
+        TokenHandle emptyScope = provider.acquire("");
+        TokenHandle populatedScope = provider.acquire(TEST_SCOPE);
+
+        assertEquals(2, requestCount.get());
+        assertNotEquals(emptyScope.generation(), populatedScope.generation());
+        assertEquals("scopeless-token", emptyScope.token());
+        assertEquals("glpi-token", populatedScope.token());
+        assertSame(emptyScope, provider.acquire(""));
+        assertSame(populatedScope, provider.acquire(TEST_SCOPE));
         assertEquals(2, requestCount.get());
     }
 

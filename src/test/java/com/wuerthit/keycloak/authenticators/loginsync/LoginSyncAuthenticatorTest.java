@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -27,8 +28,10 @@ import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.models.AuthenticationExecutionModel;
 import org.keycloak.models.ClientModel;
+import org.keycloak.models.ClientScopeModel;
 import org.keycloak.models.GroupModel;
 import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.mockito.ArgumentCaptor;
 
@@ -41,6 +44,7 @@ class LoginSyncAuthenticatorTest {
 
     private final SyncClient syncClient = mock(SyncClient.class);
     private final ClientModel client = mock(ClientModel.class);
+    private final RealmModel realm = mock(RealmModel.class);
     private final AuthenticationFlowContext context =
             mock(AuthenticationFlowContext.class, RETURNS_DEEP_STUBS);
 
@@ -137,11 +141,24 @@ class LoginSyncAuthenticatorTest {
     void scopeIsDerivedFromTheLoginClientId() {
         givenFlow("authenticate", user("jdoe@example.com"));
         when(client.getClientId()).thenReturn("grafana");
+        givenClientScopes("permissionsync:grafana");
         when(syncClient.send(any(), eq("permissionsync:grafana"))).thenReturn(SyncOutcome.SUCCESS);
 
         authenticator(CONFIGURED).authenticate(context);
 
         verify(syncClient).send(any(), eq("permissionsync:grafana"));
+        verify(context).success();
+    }
+
+    @Test
+    void emptyScopeRequestedWhenNoMatchingClientScopeExistsInRealm() {
+        givenFlow("authenticate", user("jdoe@example.com"));
+        when(realm.getClientScopesStream()).thenReturn(Stream.empty());
+        when(syncClient.send(any(), isNull())).thenReturn(SyncOutcome.SUCCESS);
+
+        authenticator(CONFIGURED).authenticate(context);
+
+        verify(syncClient).send(any(), isNull());
         verify(context).success();
     }
 
@@ -303,7 +320,14 @@ class LoginSyncAuthenticatorTest {
         when(context.getFlowPath()).thenReturn(flowPath);
         when(context.getUser()).thenReturn(user);
         when(context.getAuthenticationSession().getClient()).thenReturn(client);
+        when(context.getRealm()).thenReturn(realm);
         when(client.getClientId()).thenReturn("glpi");
+        givenClientScopes("permissionsync:glpi");
+    }
+
+    private void givenClientScopes(String... names) {
+        when(realm.getClientScopesStream())
+                .thenReturn(Stream.of(names).map(LoginSyncAuthenticatorTest::clientScope));
     }
 
     private void assertSkippedWithoutSync() {
@@ -337,5 +361,11 @@ class LoginSyncAuthenticatorTest {
         GroupModel group = mock(GroupModel.class);
         when(group.getName()).thenReturn(name);
         return group;
+    }
+
+    private static ClientScopeModel clientScope(String name) {
+        ClientScopeModel clientScope = mock(ClientScopeModel.class);
+        when(clientScope.getName()).thenReturn(name);
+        return clientScope;
     }
 }

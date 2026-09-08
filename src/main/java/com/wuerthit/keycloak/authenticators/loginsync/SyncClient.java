@@ -78,11 +78,10 @@ public class SyncClient implements AutoCloseable {
     /**
      * Sends a login-sync payload using the {@code permissionsync:<target>} OAuth2 scope.
      *
-     * <p>The scope selects both the token cache slot and the PermissionSync routing target. It must
-     * be non-null and non-blank.
+     * <p>The scope selects both the token cache slot and the PermissionSync routing target. A null
+     * or blank scope means that no specific target is requested.
      */
     public SyncOutcome send(SyncPayload payload, String scope) {
-        Objects.requireNonNull(scope, "scope");
         TokenHandle handle;
         try {
             handle = tokenProvider.acquire(scope);

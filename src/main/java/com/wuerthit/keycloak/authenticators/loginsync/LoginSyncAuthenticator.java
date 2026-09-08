@@ -104,7 +104,12 @@ public class LoginSyncAuthenticator implements Authenticator {
             context.success();
             return;
         }
-        String scope = LoginSyncConstants.PERMISSIONSYNC_SCOPE_PREFIX + clientId;
+        RealmModel realm = context.getRealm();
+        String targetScope = LoginSyncConstants.PERMISSIONSYNC_SCOPE_PREFIX + clientId;
+        boolean exists =
+                realm.getClientScopesStream()
+                        .anyMatch(clientScope -> targetScope.equals(clientScope.getName()));
+        String scope = exists ? targetScope : null;
 
         // Collected inside the session and before the HTTP call, so no model is touched once the
         // request is in flight.

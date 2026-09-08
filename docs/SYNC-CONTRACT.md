@@ -43,13 +43,15 @@ issued to it.
 
 ## Scope
 
-The plugin does not accept whatever scopes the service-account client happens to carry. It asks
-for one, explicitly. The target is the `clientId` of the client the user is logging in to, and the
-token request to `sa-token-endpoint` carries `scope=permissionsync:<clientId>` as a URL-encoded
-form parameter in its `application/x-www-form-urlencoded` body, alongside `grant_type`,
-`client_id` and `client_secret`. The issued JWT carries that scope, and the receiver routes and
-authorizes on it. The body is untouched by this: it stays at exactly the three ADR-0001 fields,
-and the target never appears in it.
+The plugin does not accept whatever scopes the service-account client happens to carry. When a
+target exists in the login realm, it asks for one explicitly. The target is the `clientId` of the
+client the user is logging in to, and the token request to `sa-token-endpoint` carries
+`scope=permissionsync:<clientId>` as a URL-encoded form parameter in its
+`application/x-www-form-urlencoded` body, alongside `grant_type`, `client_id` and `client_secret`.
+The issued JWT carries that scope, and the receiver routes and authorizes on it. The body is
+untouched by this: it stays at exactly the three ADR-0001 fields, and the target never appears in
+it. (The case where no target exists is covered separately below under "Empty scope is a valid
+no-op target".)
 
 The service-account token cache is keyed by scope. One cached token per `permissionsync:<target>`,
 each with its own refresh, so tokens for two targets are never interchanged. A `401` or `403`
@@ -62,7 +64,47 @@ unconditionally, so a service account serving two targets would emit two `permis
 tokens at once, which ADR-0002 answers with `403`. An Optional scope is included only when
 requested, which is what the plugin does. The reverse mistake is silent: Keycloak drops a requested
 scope that is not assigned to the client without raising an error, leaving a token with zero
-`permissionsync:` scope tokens that the contract also answers with `403`.
+`permissionsync:` scope tokens that the contract answers with `403`. (This occurs only when a
+target WAS requested but not provisioned; it is distinct from the no-op case covered below under
+"Empty scope is a valid no-op target", where no target existed and no scope was requested at all.)
+
+### Empty scope is a valid no-op target
+
+Not every login client has a PermissionSync target. An empty scope, meaning the token request
+carries no `scope` form parameter at all and the issued JWT carries no `permissionsync:` scope
+token, is a valid request. PermissionSync now accepts it as a no-op default target and answers
+`200` or `204`. This reverses the earlier position, which read zero `permissionsync:` scope tokens
+as a failure in every case.
+
+Which scope the plugin asks for is resolved entirely inside the realm the user is authenticating
+against, in this order:
+
+1. The authenticator reads that login realm's client-scope catalog through
+   `RealmModel.getClientScopesStream()` and looks for a `ClientScopeModel` whose name is exactly
+   `permissionsync:<clientId>`, where `<clientId>` is the client the user is logging in to.
+2. If such a client scope exists, the plugin requests that exact scope string, and everything
+   above about Optional assignment and the audience applies unchanged.
+3. If it does not exist, the plugin requests no scope. The token request body omits `scope`
+   entirely, the issued JWT carries no `permissionsync:` scope token, and the receiver treats the
+   call as targeting its no-op default.
+
+The check is a signal read from the login realm only. It says nothing about, and does not consult,
+the scopes actually assigned to the service-account client in its own (possibly different) realm.
+There is no cross-realm lookup and no Admin API call.
+
+That distinction matters, because the misconfiguration failure above is unchanged. Two different
+situations produce a token with zero `permissionsync:` scope tokens:
+
+- **No target at all.** No `permissionsync:<clientId>` client scope exists in the login realm, so
+  the plugin deliberately requested nothing. Accepted as the no-op default target.
+- **A target that could not be produced.** The login realm does have the client scope, so the
+  plugin explicitly requested `permissionsync:<clientId>`, but the operator never assigned that
+  scope to the service-account client. Keycloak silently drops the requested scope, and the
+  receiver still answers `403` per ADR-0002. This is a genuine misconfiguration and the behaviour
+  described in the paragraph above still holds.
+
+Fail-closed semantics are untouched by all of this. Only the scope value the plugin requests
+differs; a receiver failure still blocks the login exactly as before.
 
 ## Body
 
@@ -113,7 +155,9 @@ this repository implements none of them and provides no stub, scaffold or refere
 - Check `aud` contains the configured PermissionSync audience.
 - Check the `client_id` claim, emitted by the service-account client-id mapper.
 - Require the `scope` claim to contain **exactly one** exact token with the
-  `permissionsync:<target>` prefix; the suffix is the logical target the caller may touch.
+  `permissionsync:<target>` prefix; the suffix is the logical target the caller may touch. (When a
+  target was requested, this is the expected token count; see "Empty scope is a valid no-op target"
+  above for the receiver's separate no-op path, where zero such tokens are expected and accepted.)
 
 If the receiver skips these, the plugin cannot compensate. The plugin sends the token; it never
 validates it on the receiver's behalf.
@@ -122,13 +166,15 @@ validates it on the receiver's behalf.
 
 What was previously open is now decided by PermissionSync:
 
-- **Authorization** is decided by ADR-0002: the token must carry exactly one `permissionsync:<target>`
-  scope token, the PermissionSync audience, and `client_id`. Provisioning that scope/audience on the
-  service-account client is an operator task, not provider code; the plugin deliberately does not
-  hardcode a target because it varies per deployment. It requests the target derived from the login
-  client instead, which is a safe identifier only inside one trust domain: two realms can each hold a
-  client of the same name, and it is the provider's restriction to its own realm that keeps the name
-  unambiguous.
+- **Authorization** is decided by ADR-0002: when a target was requested, the token must carry
+  exactly one `permissionsync:<target>` scope token, the PermissionSync audience, and `client_id`.
+  (When no target scope exists in the login realm, the plugin requests none, and zero
+  `permissionsync:` scope tokens is the expected, accepted no-op case described above.)
+  Provisioning that scope/audience on the service-account client is an operator task, not provider
+  code; the plugin deliberately does not hardcode a target because it varies per deployment. It
+  requests the target derived from the login client instead, which is a safe identifier only inside
+  one trust domain: two realms can each hold a client of the same name, and it is the provider's
+  restriction to its own realm that keeps the name unambiguous.
 - **Ownership**: PermissionSync (the receiver) is the contract owner. `/api/sync-user` is its
   documented path and the reference value used here; an operator may still configure any path
   through the complete `service-endpoint` URL.

@@ -85,19 +85,33 @@ The plugin needs a dedicated confidential client with a service account.
 Provisioning that client is out of scope for this repository. The compose
 stack carries configuration only and provisions no realm, client, or role.
 
-Authorization is decided by PermissionSync ADR-0002: the service-account token
-must carry exactly one `permissionsync:<target>` scope, the PermissionSync
-audience, and a `client_id` claim. Provisioning that scope and audience on the
-service account is an operator task outside this repository. See
-[the sync contract](docs/SYNC-CONTRACT.md).
+Authorization is decided by PermissionSync ADR-0002: for logins where a target
+scope is requested, the service-account token must carry exactly one
+`permissionsync:<target>` scope, the PermissionSync audience, and a `client_id`
+claim. (A login with no target carries no `permissionsync:` scope; see the
+deployment details below and the "Empty scope is a valid no-op target" section
+in [the sync contract](docs/SYNC-CONTRACT.md).) Provisioning that scope and
+audience on the service account is an operator task outside this repository.
+See [the sync contract](docs/SYNC-CONTRACT.md).
 
-The plugin derives the target from the client the user is logging in to and
-requests it explicitly. It sends `scope=permissionsync:<login client id>` as a
-form parameter on the `application/x-www-form-urlencoded` Client Credentials
-request to `sa-token-endpoint`; the issued JWT then carries that scope, and the
-receiver routes and authorizes on it. For a brokered login the post-broker-login
-flow does not replace the authentication session's client, so the target is the
-original initiating login client, not the identity-provider client.
+The plugin derives the target from the client the user is logging in to,
+and it decides whether that client has a target by looking in the realm the user
+is authenticating against. It reads that login realm's client-scope catalog and
+checks for a client scope named exactly `permissionsync:<login client id>`. If
+one exists, the plugin sends `scope=permissionsync:<login client id>` as a form
+parameter on the `application/x-www-form-urlencoded` Client Credentials request
+to `sa-token-endpoint`; the issued JWT then carries that scope, and the receiver
+routes and authorizes on it. If no such client scope exists in the login realm,
+the plugin requests no scope at all, the request body omits `scope`, and the
+token carries no `permissionsync:` scope. That empty scope is a valid request:
+PermissionSync accepts it as a no-op default target and answers `200` or `204`.
+
+The check looks only at the login realm's catalog. It does not consult the
+service-account client's own scope assignments, it does not cross a realm
+boundary, and it makes no Admin API call. For a brokered login the
+post-broker-login flow does not replace the authentication session's client,
+so the target is the original initiating login client, not the
+identity-provider client.
 
 For every target an instance serves, the operator MUST provision on the
 service-account client:
@@ -106,15 +120,24 @@ service-account client:
   and explicitly **not** Default, and
 - the PermissionSync audience.
 
+A client with no target needs neither. Provision nothing for it and leave the
+login realm without a `permissionsync:<clientId>` client scope; its logins then
+travel on an empty scope and are accepted as the no-op default target.
+
 Optional is not a stylistic choice. A Default client scope is applied
 unconditionally to every token the client obtains, so a service account serving
 two targets would emit two `permissionsync:*` scopes in one token. ADR-0002
 requires exactly one, and the contract's answer to more than one is `403`. An
 Optional scope is only included when it is requested, which is what the plugin
-does. The failure in the other direction is quieter: if a requested scope is not
-assigned to the service-account client at all, Keycloak omits it from the token
-without an error, and the receiver is left with zero `permissionsync:` scopes
-and must answer `403`.
+does. The failure in the other direction is quieter, and it applies only when
+the plugin actually asked for something: if the login realm holds a matching
+`permissionsync:<clientId>` client scope, the plugin requests that scope, and
+the scope is not assigned to the service-account client at all, then Keycloak
+omits it from the token without an error, the receiver is left with zero
+`permissionsync:` scopes it was supposed to receive, and it must answer `403`.
+That is a genuine misconfiguration and is unchanged. It is not the same as a
+client that has no target scope in the login realm to begin with, where nothing
+was requested and the empty scope is expected.
 
 Using the login client's `clientId` as the target identifier is safe only within
 a single trust domain. The provider and its service account are restricted to
