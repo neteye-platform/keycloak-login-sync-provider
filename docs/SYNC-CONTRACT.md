@@ -10,8 +10,8 @@ Authority: `LLD.pdf` sections 3.3, 3.4, 4.4 and 5, plus decision R5 in
 has a governing ADR, that ADR is the authoritative receiver-side contract and this document
 mirrors it:
 [0001-inbound-synchronization-contract](https://github.com/neteye-platform/permissionsync/blob/main/docs/adr/0001-inbound-synchronization-contract.md),
-[0002-receiver-side-jwt-verification](https://github.com/.../0002-...),
-[0003-at-most-once-delivery-and-idempotent-reconciliation](https://github.com/.../0003-...).
+[0002-receiver-side-jwt-verification](https://github.com/neteye-platform/permissionsync/blob/main/docs/adr/0002-receiver-side-jwt-verification.md),
+[0003-at-most-once-delivery-and-idempotent-reconciliation](https://github.com/neteye-platform/permissionsync/blob/main/docs/adr/0003-at-most-once-delivery-and-idempotent-reconciliation.md).
 
 ## Request
 

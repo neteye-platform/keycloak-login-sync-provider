@@ -2,10 +2,12 @@ package com.wuerthit.keycloak.authenticators.loginsync;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
@@ -16,7 +18,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import jakarta.ws.rs.core.Response;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -26,6 +30,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.keycloak.Config;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
+import org.keycloak.forms.login.LoginFormsProvider;
 import org.keycloak.models.AuthenticationExecutionModel;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.ClientScopeModel;
@@ -265,9 +270,57 @@ class LoginSyncAuthenticatorTest {
         when(syncClient.send(any(), eq("permissionsync:glpi")))
                 .thenReturn(SyncOutcome.SERVER_ERROR);
 
+        // The form mock echoes the message key the authenticator sets back into the error
+        // page entity, so a future edit that renders user data into the error page surfaces
+        // in the sentinel assertions below instead of passing silently.
+        LoginFormsProvider form = mock(LoginFormsProvider.class);
+        AtomicReference<String> renderedKey = new AtomicReference<>();
+        when(form.setError(anyString()))
+                .thenAnswer(
+                        invocation -> {
+                            renderedKey.set(invocation.getArgument(0));
+                            return form;
+                        });
+        when(form.createErrorPage(any()))
+                .thenAnswer(
+                        invocation -> {
+                            Response response = mock(Response.class);
+                            when(response.getEntity()).thenReturn(renderedKey.get());
+                            return response;
+                        });
+        when(context.form()).thenReturn(form);
+
         authenticator(CONFIGURED).authenticate(context);
 
         assertLoginBlocked();
+        ArgumentCaptor<AuthenticationFlowError> error =
+                ArgumentCaptor.forClass(AuthenticationFlowError.class);
+        ArgumentCaptor<Response> response = ArgumentCaptor.forClass(Response.class);
+        ArgumentCaptor<String> eventDetail = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> messageKey = ArgumentCaptor.forClass(String.class);
+        verify(context)
+                .failure(
+                        error.capture(),
+                        response.capture(),
+                        eventDetail.capture(),
+                        messageKey.capture());
+
+        assertEquals(AuthenticationFlowError.INTERNAL_ERROR, error.getValue());
+        assertEquals("login_sync_failed", eventDetail.getValue());
+        assertEquals("loginSyncFailed", messageKey.getValue());
+        assertEquals("loginSyncFailed", renderedKey.get());
+        for (String userData : List.of("jdoe", "sentinel.test", "GROUP_SENTINEL")) {
+            for (String reported :
+                    List.of(
+                            String.valueOf(response.getValue().getEntity()),
+                            eventDetail.getValue(),
+                            messageKey.getValue(),
+                            error.getValue().name())) {
+                assertFalse(
+                        reported.contains(userData),
+                        "user data " + userData + " leaked into reported message " + reported);
+            }
+        }
     }
 
     @Test
