@@ -22,8 +22,8 @@ stack (`podman-compose.yml`, `Makefile`, `.env.example`) and a root
 
 ## Releases
 
-- The release workflow runs on `push` to `main`; `workflow_dispatch` is also
-  active.
+- The release workflow runs on `push` to `main` that changes `pom.xml`;
+  `workflow_dispatch` is also active for manual or recovery runs.
 - Each release workflow run resolves the POM version's `v<version>` Release. An
   existing Release is a no-op. When absent, it builds the POM version's jar,
   retains an existing tag or creates an absent one, then creates the Release.
