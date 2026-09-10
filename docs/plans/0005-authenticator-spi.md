@@ -23,7 +23,7 @@ The sync is **fail-closed**: any sync failure blocks the login rather than permi
 
 **Why revision 2 rewrote the skip path - the most important change in the portfolio.** Revision 1
 used `context.attempted()` for every deliberate skip. That is **wrong and would have broken every
-login** whenever the plugin was unconfigured or the flow path was not `authenticate`. Verified
+login** whenever the plugin was unconfigured or the flow path was not synchronized. Verified
 from Keycloak 26.7.0 source: `AuthenticationProcessor.isSuccessful()` returns true **only** for
 `ExecutionStatus.SUCCESS`; `DefaultAuthenticationFlow` line 295 gates REQUIRED executions on it and
 breaks the loop; `authenticateOnly()` line 1132 then throws `AuthenticationFlowException`. **Every
@@ -80,7 +80,7 @@ A0-A9 with the failure each prevents.
 | A3      | `action(...)` throws `IllegalStateException`                                                                          | this authenticator never issues a challenge; reaching `action` is a logic error                                                    |
 | A4      | `getConfigProperties()` returns `Collections.emptyList()`, `isConfigurable()` false                                   | unambiguously safe; per-realm config is out of scope for v1                                                                        |
 | A5      | Missing configuration logs one ERROR and calls `context.success()`                                                    | `init()` runs even when bound to no flow; throwing would brick unrelated installs, and `attempted()` would break logins            |
-| A6      | `getFlowPath()` mapped **exhaustively** with a `success()` skip default                                               | `reset-credentials`, `first-broker-login` and any future path must skip without emitting a wrong `event_type`                      |
+| A6      | `getFlowPath()` mapped **exhaustively** as a two-path whitelist with a `success()` skip default                       | `authenticate` and `post-broker-login` sync; `reset-credentials`, `first-broker-login` and any future path must skip               |
 | A7      | Token provider and sync client are per-JVM singletons owned by the factory                                            | per-request instances would give every login its own token cache and connection pool                                               |
 | A8      | Blocking HTTP in `authenticate()` is safe                                                                             | Keycloak's JAX-RS application is `@Blocking`, so this runs on a worker thread                                                      |
 | **A9**  | **The sync is fail-closed: any `SyncOutcome` with `blocksLogin() == true` blocks the login, never permitting it**     | **a receiver outage or token failure must not let the user in unsynced**                                                           |
@@ -169,9 +169,14 @@ Per invariant P1 every check names a command; per P3 record `BASE_SHA`.
     `action(...)` throws `IllegalStateException` (A3); `close()` no-op.
   - `authenticate(context)` in this exact order:
     1. If not `configured()` - log ERROR once and **`context.success()`** (A5). Return.
-    2. Map `context.getFlowPath()` **exhaustively** (A6): only `authenticate` proceeds. Every other
-       value - `registration`, `reset-credentials`, `first-broker-login`, and any unknown future
-       value - falls to a default branch that logs DEBUG and calls **`context.success()`**. Return.
+    2. Map `context.getFlowPath()` **exhaustively** (A6) as a two-path whitelist:
+       `LoginActionsService.AUTHENTICATE_PATH` and `LoginActionsService.POST_BROKER_LOGIN_PATH`
+       proceed, because an identity-provider login is completed through the post-broker-login flow
+       (`IdpConfig.getPostBrokerLoginFlowId`, dispatched by
+       `IdentityBrokerService.finishOrRedirectToPostBrokerLogin`) and must sync too. Every other
+       value - `registration`, `reset-credentials`, `first-broker-login`, a null path, and any
+       unknown future value - falls to a default branch that logs DEBUG and calls
+       **`context.success()`**. Return.
     3. Defence-in-depth: if `context.getUser()` is null or the authentication session's client is
        null, log DEBUG and **`context.success()`**. Return. **Document honestly** that this is not
        the guard against a misplaced execution: because `requiresUser()` is `true`, Keycloak throws
@@ -215,10 +220,12 @@ Per invariant P1 every check names a command; per P3 record `BASE_SHA`.
   - **Flow path `registration`:** `success()`, no sync call.
   - **Flow path `reset-credentials`:** `success()`, no sync call.
   - **Flow path `first-broker-login`:** `success()`, no sync call.
+  - **Flow path `post-broker-login`:** the sync runs, proving identity-provider logins synchronize.
+  - **Null flow path:** `success()`, no sync call.
   - **Unknown/novel flow path:** `success()`, no sync call - proving the default is a real default.
   - **Sync failure blocks the login (fail-closed, A9):** `verify(context).failure(eq(INTERNAL_ERROR), any(), eq("login_sync_failed"), eq("loginSyncFailed"))` - for `REJECTED`, `SERVER_ERROR`, `TIMEOUT`, `TRANSPORT_ERROR` and `UNAUTHORIZED`.
   - **`TOKEN_UNAVAILABLE` blocks the login:** as above; the user is not permitted unsynced.
-  - **`SKIPPED_SATURATED` permits the login:** `success()` and no sync call.
+  - **`SATURATED` blocks the login:** `verify(context).failure(...)` - the bulkhead is full, no sync call, login blocked fail-closed.
   - **`SyncClient.send` throws `SyncFailedException`:** the login is blocked (fail-closed).
   - **`SyncClient.send` throws an unexpected `RuntimeException`:** the login is blocked (fail-closed).
   - **`action(...)`:** throws `IllegalStateException`.
@@ -248,7 +255,8 @@ Three commits: two `feat:` and one `test:`. `pom.xml` untouched, so no release f
 
 1. `context.attempted()` appears nowhere in main; every deliberate skip calls `context.success()`.
 2. The built jar registers `login-sync` and ships the message bundle.
-3. Only the `authenticate` flow path syncs; every other path skips with no sync call.
+3. Only the `authenticate` and `post-broker-login` flow paths sync; every other path skips with no
+   sync call.
 4. The sync is fail-closed: every blocking `SyncOutcome` blocks the login with a rendered
-   `loginSyncFailed` page, and saturating skip permits the login.
+   `loginSyncFailed` page, and bulkhead saturation blocks the login.
 5. The plugin never touches the authenticating user's token.

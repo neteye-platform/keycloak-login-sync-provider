@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Runs the build and the tests, with or without a local JDK.
 #
-# With Maven on PATH it just runs Maven. Without it, it runs Maven inside a
-# container and hands that container the host's container socket, so the
-# integration tests can still start Keycloak through Testcontainers.
+# With Maven on PATH it runs Maven directly. Integration goals require a host
+# container socket. Without local Maven, Maven runs inside a container and is
+# handed that socket so the integration tests can start Keycloak through
+# Testcontainers.
 #
 # Usage:
 #   scripts/test.sh              # clean verify: unit and integration tests
@@ -14,12 +15,58 @@ set -euo pipefail
 MAVEN_IMAGE="maven:3.9-eclipse-temurin-21"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Rootless Podman puts its socket under the user's runtime directory.
+podman_socket="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock"
+# Test-only override for exercising no-socket behavior on hosts with Docker;
+# DOCKER_SOCKET_PATH is not an operator-facing setting.
+docker_socket="${DOCKER_SOCKET_PATH:-/var/run/docker.sock}"
+
+goals_need_container_socket() {
+    local goal
+    for goal in "$@"; do
+        case "$goal" in
+            verify | integration-test | failsafe:integration-test) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+resolve_container_socket() {
+    # Integration tests need the host's socket to start Keycloak.
+    if [ -n "${DOCKER_HOST:-}" ] && [ -S "${DOCKER_HOST#unix://}" ]; then
+        printf '%s\n' "${DOCKER_HOST#unix://}"
+    elif [ -S "$podman_socket" ]; then
+        printf '%s\n' "$podman_socket"
+    elif [ -S "$docker_socket" ]; then
+        printf '%s\n' "$docker_socket"
+    else
+        return 1
+    fi
+}
+
+require_container_socket() {
+    if ! socket="$(resolve_container_socket)"; then
+        echo "No container socket found; start one, or set DOCKER_HOST." >&2
+        echo "For rootless Podman: systemctl --user start podman.socket" >&2
+        exit 1
+    fi
+}
+
 goals=("$@")
 if [ ${#goals[@]} -eq 0 ]; then
     goals=(clean verify)
 fi
 
+socket=""
+if goals_need_container_socket "${goals[@]}"; then
+    require_container_socket
+fi
+
 if command -v mvn >/dev/null 2>&1; then
+    if [ -n "$socket" ] && [ "$socket" = "$podman_socket" ]; then
+        export DOCKER_HOST="unix://$socket"
+        export TESTCONTAINERS_RYUK_DISABLED=true
+    fi
     mvn -B "${goals[@]}"
     exit $?
 fi
@@ -38,24 +85,18 @@ if [ -z "$runtime" ]; then
     exit 1
 fi
 
-# The container needs the host's socket to start Keycloak for the integration
-# tests. Rootless Podman puts it under the user's runtime directory.
-podman_socket="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock"
 extra_env=()
-if [ -n "${DOCKER_HOST:-}" ] && [ -S "${DOCKER_HOST#unix://}" ]; then
-    socket="${DOCKER_HOST#unix://}"
-elif [ -S "$podman_socket" ]; then
-    socket="$podman_socket"
-elif [ -S /var/run/docker.sock ]; then
-    socket="/var/run/docker.sock"
-else
-    echo "No container socket found; start one, or set DOCKER_HOST." >&2
-    echo "For rootless Podman: systemctl --user start podman.socket" >&2
-    exit 1
-fi
-if [ "$socket" = "$podman_socket" ]; then
-    # Testcontainers' resource reaper cannot attach to a rootless daemon.
-    extra_env+=(-e TESTCONTAINERS_RYUK_DISABLED=true)
+mount_args=()
+if [ -n "$socket" ]; then
+    if [ "$socket" = "$podman_socket" ]; then
+        # Testcontainers' resource reaper cannot attach to a rootless daemon.
+        extra_env+=(-e TESTCONTAINERS_RYUK_DISABLED=true)
+    fi
+    # Testcontainers needs the host socket to start Keycloak.
+    mount_args+=(
+        --volume "$socket:/var/run/docker.sock"
+        --env DOCKER_HOST=unix:///var/run/docker.sock
+    )
 fi
 
 # Survives between runs, so only the first one pays for the dependencies.
@@ -70,7 +111,6 @@ mkdir -p "$maven_cache"
     --volume "$repo_root:/workspace:Z" \
     --workdir /workspace \
     --volume "$maven_cache:/root/.m2:Z" \
-    --volume "$socket:/var/run/docker.sock" \
-    --env DOCKER_HOST=unix:///var/run/docker.sock \
+    "${mount_args[@]}" \
     "${extra_env[@]}" \
     "$MAVEN_IMAGE" mvn -B "${goals[@]}"
