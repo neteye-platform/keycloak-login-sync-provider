@@ -104,7 +104,9 @@ to `sa-token-endpoint`; the issued JWT then carries that scope, and the receiver
 routes and authorizes on it. If no such client scope exists in the login realm,
 the plugin requests no scope at all, the request body omits `scope`, and the
 token carries no `permissionsync:` scope. That empty scope is a valid request:
-PermissionSync accepts it as a no-op default target and answers `200` or `204`.
+PermissionSync accepts it as a targetless no-op and always answers `204`;
+ADR-0001 reserves `200` for selected-target reconciliation that changed
+target state.
 
 The check looks only at the login realm's catalog. It does not consult the
 service-account client's own scope assignments, it does not cross a realm
@@ -122,22 +124,27 @@ service-account client:
 
 A client with no target needs neither. Provision nothing for it and leave the
 login realm without a `permissionsync:<clientId>` client scope; its logins then
-travel on an empty scope and are accepted as the no-op default target.
+travel on an empty scope and complete as the targetless no-op.
 
 Optional is not a stylistic choice. A Default client scope is applied
 unconditionally to every token the client obtains, so a service account serving
 two targets would emit two `permissionsync:*` scopes in one token. ADR-0002
 requires exactly one, and the contract's answer to more than one is `403`. An
 Optional scope is only included when it is requested, which is what the plugin
-does. The failure in the other direction is quieter, and it applies only when
+does. The failure in the other direction is silent, and it applies only when
 the plugin actually asked for something: if the login realm holds a matching
 `permissionsync:<clientId>` client scope, the plugin requests that scope, and
 the scope is not assigned to the service-account client at all, then Keycloak
-omits it from the token without an error, the receiver is left with zero
-`permissionsync:` scopes it was supposed to receive, and it must answer `403`.
-That is a genuine misconfiguration and is unchanged. It is not the same as a
-client that has no target scope in the login realm to begin with, where nothing
-was requested and the empty scope is expected.
+omits it from the token without an error and the receiver is left with zero
+`permissionsync:` scopes it was supposed to receive. Under the revised
+ADR-0001 and ADR-0002, zero `permissionsync:` scope tokens is not a failure:
+with a valid body the receiver answers `204` as a targetless no-op, exactly
+the answer a login that never had a target receives. The misconfiguration is
+real but now fails silently: the login is permitted and the target is never
+reconciled, and neither the plugin nor the HTTP response can expose it because
+the body carries no target and the `2xx` carries no body. ADR-0002 assigns
+that detection to the receiver's targetless no-op telemetry (ADR-0006) and to
+operator review of the service-account provisioning.
 
 Using the login client's `clientId` as the target identifier is safe only within
 a single trust domain. The provider and its service account are restricted to
@@ -157,11 +164,14 @@ Deploy the built JAR into `/opt/keycloak/providers`.
 - The service-account token cache is per-JVM, therefore per-node in a cluster,
   and is keyed per scope. There is one cached token per
   `permissionsync:<target>`, so two target clients never share a token.
-- While the scope provisioning is wrong, a `403` evicts that scope's cached
-  token, so the next login fetches a fresh one. Logins for that target then
-  refetch a token every time until an operator fixes the provisioning. That is
-  deliberate: it surfaces the misconfiguration instead of caching a token that
-  cannot work.
+- A `401` or `403` evicts that scope's cached token, so the next login
+  fetches a fresh one. Logins for that target then refetch a token every time
+  until an operator fixes the provisioning. That is deliberate: it surfaces
+  the misconfiguration instead of caching a token that cannot work. This only
+  covers provisioning mistakes that still put `permissionsync:` tokens in the
+  token, such as more than one scope assigned as Default or a suffix that
+  violates the ADR-0001 target grammar. A scope Keycloak silently drops never
+  yields a `403`: per ADR-0002 it completes as a targetless no-op `204`.
 - There is no retry and no buffering. A single timeout or 5xx response fails
   that login.
 - Synchronization is fail-closed: a receiver failure blocks the login. This is

@@ -62,18 +62,21 @@ For each target an instance serves, the operator must assign the client scope
 also provision the PermissionSync audience. A Default scope is applied to every token
 unconditionally, so a service account serving two targets would emit two `permissionsync:*` scope
 tokens at once, which ADR-0002 answers with `403`. An Optional scope is included only when
-requested, which is what the plugin does. The reverse mistake is silent: Keycloak drops a requested
-scope that is not assigned to the client without raising an error, leaving a token with zero
-`permissionsync:` scope tokens that the contract answers with `403`. (This occurs only when a
-target WAS requested but not provisioned; it is distinct from the no-op case covered below under
-"Empty scope is a valid no-op target", where no target existed and no scope was requested at all.)
+requested, which is what the plugin does. The reverse mistake is silent twice over: Keycloak drops
+a requested scope that is not assigned to the client without raising an error, leaving a token with
+zero `permissionsync:` scope tokens — and the revised ADR-0002 never answers zero tokens with
+`403`; after strict body validation it answers the targetless no-op `204`. (This occurs only when
+a target WAS requested but not provisioned. It differs in intent from the case covered below under
+"Empty scope is a valid no-op target", where no target existed and no scope was requested at all,
+but both complete with the same `204`.)
 
 ### Empty scope is a valid no-op target
 
 Not every login client has a PermissionSync target. An empty scope, meaning the token request
 carries no `scope` form parameter at all and the issued JWT carries no `permissionsync:` scope
-token, is a valid request. PermissionSync now accepts it as a no-op default target and answers
-`200` or `204`. This reverses the earlier position, which read zero `permissionsync:` scope tokens
+token, is a valid request. PermissionSync now accepts it as a targetless no-op and answers
+`204`, always; ADR-0001 reserves `200` for selected-target reconciliation that changed target
+state. This reverses the earlier position, which read zero `permissionsync:` scope tokens
 as a failure in every case.
 
 Which scope the plugin asks for is resolved entirely inside the realm the user is authenticating
@@ -86,25 +89,31 @@ against, in this order:
    above about Optional assignment and the audience applies unchanged.
 3. If it does not exist, the plugin requests no scope. The token request body omits `scope`
    entirely, the issued JWT carries no `permissionsync:` scope token, and the receiver treats the
-   call as targeting its no-op default.
+   call as a targetless no-op.
 
 The check is a signal read from the login realm only. It says nothing about, and does not consult,
 the scopes actually assigned to the service-account client in its own (possibly different) realm.
 There is no cross-realm lookup and no Admin API call.
 
-That distinction matters, because the misconfiguration failure above is unchanged. Two different
-situations produce a token with zero `permissionsync:` scope tokens:
+That distinction matters only for intent, because the revised ADR-0001 and ADR-0002 give both of
+them the same outcome. Two different situations produce a token with zero `permissionsync:` scope
+tokens:
 
 - **No target at all.** No `permissionsync:<clientId>` client scope exists in the login realm, so
-  the plugin deliberately requested nothing. Accepted as the no-op default target.
+  the plugin deliberately requested nothing. Accepted as the targetless no-op.
 - **A target that could not be produced.** The login realm does have the client scope, so the
   plugin explicitly requested `permissionsync:<clientId>`, but the operator never assigned that
   scope to the service-account client. Keycloak silently drops the requested scope, and the
-  receiver still answers `403` per ADR-0002. This is a genuine misconfiguration and the behaviour
-  described in the paragraph above still holds.
+  receiver — seeing zero `permissionsync:` tokens and a valid body — answers the same targetless
+  `204` as the case above. This is still a genuine misconfiguration, but it now fails silently:
+  the login is permitted, the target is never reconciled, and the plugin cannot detect it because
+  the body carries no target and the `204` carries no body. ADR-0002 assigns that detection to
+  the receiver's targetless no-op telemetry (ADR-0006) and to operator provisioning review.
 
-Fail-closed semantics are untouched by all of this. Only the scope value the plugin requests
-differs; a receiver failure still blocks the login exactly as before.
+Fail-closed semantics for genuine receiver failures are untouched by all of this. Only the scope
+value the plugin requests differs; a receiver failure (`400`, `401`, `403`, `5xx`, timeout, IO
+error) still blocks the login exactly as before. What no longer blocks is the dropped-scope case
+above, which the receiver now reports as a `204` success.
 
 ## Body
 
@@ -130,16 +139,21 @@ Example:
 
 ## Responses
 
-| outcome           | plugin interpretation                              |
-| ----------------- | -------------------------------------------------- |
-| `200 OK`          | success: the target changed to the desired state   |
-| `204 No Content`  | success: the target already had the desired state  |
-| `400 Bad Request` | single-attempt failure, no second POST             |
-| `401`             | single-attempt failure, no second POST             |
-| `403`             | single-attempt failure, no second POST             |
-| `500`             | single-attempt failure, no second POST             |
-| timeout           | single-attempt failure, no second POST             |
-| IO error          | single-attempt failure, no second POST             |
+| outcome           | plugin interpretation                            |
+| ----------------- | ------------------------------------------------ |
+| `200 OK`          | success: the target changed to the desired state |
+| `204 No Content`  | success: target unchanged, or targetless no-op   |
+| `400 Bad Request` | single-attempt failure, no second POST           |
+| `401`             | single-attempt failure, no second POST           |
+| `403`             | single-attempt failure, no second POST           |
+| `500`             | single-attempt failure, no second POST           |
+| timeout           | single-attempt failure, no second POST           |
+| IO error          | single-attempt failure, no second POST           |
+
+Per ADR-0001, `200` is returned only by selected-target reconciliation that changed target state.
+`204` covers two distinct successes — selected-target reconciliation that reported `unchanged`,
+and the targetless no-op where the token carried zero `permissionsync:` tokens — and the two are
+indistinguishable on the wire.
 
 Every non-success outcome is terminal for that login. There is exactly one HTTP attempt per
 logical sync, and an admitted failure blocks the login rather than permitting it.
