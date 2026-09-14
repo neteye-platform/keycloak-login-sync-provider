@@ -78,8 +78,6 @@ if [ -n "$socket" ]; then
     )
 fi
 
-# Testcontainers' resource reaper cannot attach to some daemons (e.g. rootless
-# ones); forward the operator's choice instead of deciding it here.
 extra_env=()
 if [ -n "${TESTCONTAINERS_RYUK_DISABLED:-}" ]; then
     extra_env+=(--env "TESTCONTAINERS_RYUK_DISABLED=$TESTCONTAINERS_RYUK_DISABLED")

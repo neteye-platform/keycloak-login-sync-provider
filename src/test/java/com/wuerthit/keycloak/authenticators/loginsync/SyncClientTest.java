@@ -259,7 +259,7 @@ class SyncClientTest {
 
         assertSame(SyncOutcome.SATURATED, outcome);
         assertRequestCount(requestCount, 0);
-        assertEquals(1, tokenProvider.acquisitionCount());
+        assertEquals(0, tokenProvider.acquisitionCount());
         assertTrue(outcome.blocksLogin());
     }
 
@@ -317,7 +317,7 @@ class SyncClientTest {
     }
 
     @Test
-    void tokenFetchedBeforeSemaphore() throws Exception {
+    void tokenFetchRunsInsideTheBulkheadPermit() throws Exception {
         int fullPermitCount = 1;
         AtomicInteger requestCount = new AtomicInteger();
         CountDownLatch tokenRequestStarted = new CountDownLatch(1);
@@ -351,7 +351,7 @@ class SyncClientTest {
                 CompletableFuture.supplyAsync(() -> client.send(payload(), TEST_SCOPE), caller);
         try {
             assertTrue(tokenRequestStarted.await(3, TimeUnit.SECONDS));
-            assertEquals(fullPermitCount, client.availablePermits());
+            assertEquals(0, client.availablePermits());
         } finally {
             releaseTokenResponse.countDown();
         }

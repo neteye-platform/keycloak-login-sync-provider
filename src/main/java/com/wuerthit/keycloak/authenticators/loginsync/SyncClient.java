@@ -82,18 +82,18 @@ public class SyncClient implements AutoCloseable {
      * or blank scope means that no specific target is requested.
      */
     public SyncOutcome send(SyncPayload payload, String scope) {
-        TokenHandle handle;
-        try {
-            handle = tokenProvider.acquire(scope);
-        } catch (SyncFailedException failure) {
-            return failure.outcome();
-        }
-
         if (!semaphore.tryAcquire()) {
             return SyncOutcome.SATURATED;
         }
 
         try {
+            TokenHandle handle;
+            try {
+                handle = tokenProvider.acquire(scope);
+            } catch (SyncFailedException failure) {
+                return failure.outcome();
+            }
+
             // Retry and backoff are deliberately REMOVED per LLD 3.7 and R-01.
             HttpRequest request =
                     HttpRequest.newBuilder(targetUri)
