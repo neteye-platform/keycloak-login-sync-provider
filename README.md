@@ -9,8 +9,8 @@ Client Credentials. See [the sync contract](docs/SYNC-CONTRACT.md) and
 ## Build and test
 
 Copy `.env.example` to the git-ignored `.env` before starting the local stack.
-The stack is defined in `podman-compose.yml`; the Makefile drives it through
-the container runtime's compose command.
+The stack is defined in `compose.yml`; the Makefile drives it through
+`docker compose`.
 
 Use `scripts/test.sh` as the only supported Maven entry point. It supplies
 Java 21 through a container when Maven is unavailable locally. Run the full
@@ -191,7 +191,7 @@ Deploy the built JAR into `/opt/keycloak/providers`.
 - `src/test/java/` contains unit tests, support code, and `LoginSyncIT`.
 - `docs/` contains decisions, contracts, plans, and generated QA evidence.
 - `scripts/test.sh` is the supported Maven entry point.
-- `podman-compose.yml` defines the local two-service stack.
+- `compose.yml` defines the local two-service stack.
 - `Makefile` provides the local development commands.
 
 ## Releasing

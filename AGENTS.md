@@ -6,7 +6,7 @@ This repository provides the Keycloak `login-sync` Authenticator. The provider
 is implemented under `src/main/java/`, with its `AuthenticatorFactory` service
 file and `messages_en.properties` under `src/main/resources/`. Unit tests and
 the Testcontainers `LoginSyncIT` live under `src/test/java/`. The local dev
-stack (`podman-compose.yml`, `Makefile`, `.env.example`) and a root
+stack (`compose.yml`, `Makefile`, `.env.example`) and a root
 `README.md` all exist, and the release `push` trigger is active.
 
 ## Build And Test
@@ -22,8 +22,8 @@ stack (`podman-compose.yml`, `Makefile`, `.env.example`) and a root
 
 ## Releases
 
-- The release workflow runs on `push` to `main` that changes `pom.xml`;
-  `workflow_dispatch` is also active for manual or recovery runs.
+- The release workflow runs on `push` to `main`; `workflow_dispatch` is also
+  active.
 - Each release workflow run resolves the POM version's `v<version>` Release. An
   existing Release is a no-op. When absent, it builds the POM version's jar,
   retains an existing tag or creates an absent one, then creates the Release.

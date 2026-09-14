@@ -1,4 +1,4 @@
-COMPOSE := docker compose -f podman-compose.yml
+COMPOSE := docker compose
 
 .PHONY: build deploy up down reset logs test fmt
 
