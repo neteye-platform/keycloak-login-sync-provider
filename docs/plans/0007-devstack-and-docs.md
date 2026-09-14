@@ -7,7 +7,7 @@ wave: 5
 prerequisites: [0001-contract-reconciliation, 0005-authenticator-spi, 0006-integration-harness]
 parallel_with: []
 owns_files:
-  - podman-compose.yml
+  - compose.yml
   - .env.example
   - Makefile
   - README.md # create from the currently absent root README baseline
@@ -15,7 +15,7 @@ owns_files:
 
 ## TL;DR (For humans)
 
-**What you'll get.** The local feedback loop from LLD section 6 - a podman-compose stack running
+**What you'll get.** The local feedback loop from LLD section 6 - a docker compose stack running
 Keycloak with the plugin bind-mounted plus a mock receiver, driven by a Makefile - and the
 operator-facing documentation: every environment variable verbatim, the deployment constraint that
 makes or breaks the plugin, and an honest limitations section.
@@ -40,7 +40,7 @@ second mock implementation. No Python. No `.gitignore` edit (plan 0002 owns that
 
 ### In scope
 
-- `podman-compose.yml` + `.env.example`: Keycloak with the built jar bind-mounted, plus the mock.
+- `compose.yml` + `.env.example`: Keycloak with the built jar bind-mounted, plus the mock.
 - `Makefile`: `build`, `deploy`, `up`, `down`, `reset`, `logs`, `test`, `fmt`.
 - Create `README.md` from the absent baseline with project, Configuration, Deployment, and
   Limitations sections.
@@ -104,7 +104,7 @@ Todo 3 comes last so the documented Makefile targets and env names match what ex
 
 ## Todos
 
-- [ ] 1. `podman-compose.yml` + `.env.example`: the local stack - expect Keycloak to boot with the provider loaded against the mock
+- [ ] 1. `compose.yml` + `.env.example`: the local stack - expect Keycloak to boot with the provider loaded against the mock
 
   **References:** `LLD.pdf` section 6; plan 0006's `MockSyncService.main` (E1, E6); the
   user-confirmed spelling recorded by plan 0001.
@@ -123,18 +123,18 @@ Todo 3 comes last so the documented Makefile targets and env names match what ex
     Create `.env.example` with every variable and **placeholder** values only (E3). Do **not** edit
     `.gitignore`; plan 0002 already ignores `.env`. Add a comment stating the stack carries
     configuration only and MUST NOT provision realms, clients or roles.
-    **Acceptance criteria:** `podman-compose -f podman-compose.yml config` exits 0.
-    `grep -c 'KC_SPI_AUTHENTICATOR__LOGIN_SYNC__' podman-compose.yml` returns 5.
-    `grep -c 'KC_SPI_AUTHENTICATOR_LOGIN_SYNC_' podman-compose.yml` returns 0 - the single-underscore
-    form must be absent. `grep -c 'test-classes' podman-compose.yml` returns >= 1.
-    `grep -rciE 'jar' podman-compose.yml | grep -qv 'test-jar'` - assert no test-jar reference.
+    **Acceptance criteria:** `docker compose -f compose.yml config` exits 0.
+    `grep -c 'KC_SPI_AUTHENTICATOR__LOGIN_SYNC__' compose.yml` returns 5.
+    `grep -c 'KC_SPI_AUTHENTICATOR_LOGIN_SYNC_' compose.yml` returns 0 - the single-underscore
+    form must be absent. `grep -c 'test-classes' compose.yml` returns >= 1.
+    `grep -rciE 'jar' compose.yml | grep -qv 'test-jar'` - assert no test-jar reference.
     `git check-ignore -q .env` exits 0 (inherited from plan 0002).
     **QA happy:** `make up && make logs` shows both services healthy and the container log contains
     the `login-sync` provider; then `make down`. Evidence: `docs/evidence/0007-compose-up.log`.
     **QA failure:** run `grep -rnE '(password|secret)\s*=\s*\S+' .env.example` and assert every value
     matches a placeholder pattern such as `CHANGEME` or `<...>`; then assert
     `git check-ignore -q .env` exits 0, proving a real `.env` cannot be committed. Evidence: `docs/evidence/0007-compose-secrets.log`.
-    **Commit:** `chore: add podman-compose local development stack`
+    **Commit:** `chore: add docker compose local development stack`
 
 - [ ] 2. `Makefile`: the local feedback loop - expect `make reset` to leave nothing behind
 
@@ -158,7 +158,7 @@ Todo 3 comes last so the documented Makefile targets and env names match what ex
     through `scripts/test.sh`.
     **QA happy:** `make build && make up && make logs` succeeds and shows the provider loaded; then
     `make down`. Evidence: `docs/evidence/0007-make-targets.log`.
-    **QA failure:** `make reset`, then assert `podman ps -a --format '{{.Names}}' | grep -c login-sync`
+    **QA failure:** `make reset`, then assert `docker ps -a --format '{{.Names}}' | grep -c login-sync`
     returns 0 and `test ! -d target` exits 0, proving the reset is complete. Evidence: `docs/evidence/0007-make-reset.log`.
     **Commit:** `chore: add Makefile for the local development loop`
 
@@ -210,9 +210,9 @@ Todo 3 comes last so the documented Makefile targets and env names match what ex
 
 ## Final verification wave
 
-- [ ] F1. Dev-stack audit (executable). Run, recording exit statuses: `make build` (expect 0, and `test -d target/test-classes` exits 0); `make up` (expect 0); `podman ps --format '{{.Names}} {{.Status}}'` showing both services `Up`; `podman logs <keycloak> | grep -c 'login-sync'` >= 1. Then drive the documented manual check: `curl -sf -X POST localhost:<mockport>/__control -d '{"mode":"http500"}'`, perform a browser login with `curl` following redirects, and assert an HTTP 500 with `loginSyncFailed` in the body; switch back with `{"mode":"ok"}` and assert the login yields a `code=` parameter. Finish with `make reset`, then `podman ps -a --format '{{.Names}}' | grep -c login-sync` expecting 0 and `test ! -d target` expecting 0. Evidence: `docs/evidence/0007-F1-devstack.md`.
+- [ ] F1. Dev-stack audit (executable). Run, recording exit statuses: `make build` (expect 0, and `test -d target/test-classes` exits 0); `make up` (expect 0); `docker ps --format '{{.Names}} {{.Status}}'` showing both services `Up`; `docker logs <keycloak> | grep -c 'login-sync'` >= 1. Then drive the documented manual check: `curl -sf -X POST localhost:<mockport>/__control -d '{"mode":"http500"}'`, perform a browser login with `curl` following redirects, and assert an HTTP 500 with `loginSyncFailed` in the body; switch back with `{"mode":"ok"}` and assert the login yields a `code=` parameter. Finish with `make reset`, then `docker ps -a --format '{{.Names}}' | grep -c login-sync` expecting 0 and `test ! -d target` expecting 0. Evidence: `docs/evidence/0007-F1-devstack.md`.
 
-- [ ] F2. Documentation and scope audit (executable). Run the eight-string presence loop from todo 3 expecting no output. Run `grep -c 'KC_SPI_AUTHENTICATOR__LOGIN_SYNC__' README.md` expecting >= 5 and `grep -c 'KC_SPI_AUTHENTICATOR_LOGIN_SYNC_' README.md` expecting 0. Run `find . -path ./.git -prune -o \( -iname 'Dockerfile*' -o -iname 'Containerfile*' -o -name '*.spec' -o -name '*.py' \) -print` expecting no output. Run `grep -rc 'class MockSyncService' src/ | awk -F: '{s+=$2} END {exit !(s==1)}'` expecting exit 0, proving exactly one mock implementation. With `BASE_SHA` per P3, `git diff --name-only $BASE_SHA..HEAD` equals exactly `{podman-compose.yml, .env.example, Makefile, README.md}` - in particular `.gitignore`, `pom.xml`, `.github/` and `src/` must not appear. Evidence: `docs/evidence/0007-F2-scope.md`.
+- [ ] F2. Documentation and scope audit (executable). Run the eight-string presence loop from todo 3 expecting no output. Run `grep -c 'KC_SPI_AUTHENTICATOR__LOGIN_SYNC__' README.md` expecting >= 5 and `grep -c 'KC_SPI_AUTHENTICATOR_LOGIN_SYNC_' README.md` expecting 0. Run `find . -path ./.git -prune -o \( -iname 'Dockerfile*' -o -iname 'Containerfile*' -o -name '*.spec' -o -name '*.py' \) -print` expecting no output. Run `grep -rc 'class MockSyncService' src/ | awk -F: '{s+=$2} END {exit !(s==1)}'` expecting exit 0, proving exactly one mock implementation. With `BASE_SHA` per P3, `git diff --name-only $BASE_SHA..HEAD` equals exactly `{compose.yml, .env.example, Makefile, README.md}` - in particular `.gitignore`, `pom.xml`, `.github/` and `src/` must not appear. Evidence: `docs/evidence/0007-F2-scope.md`.
 
 ## Commit strategy
 

@@ -192,7 +192,7 @@ Those constraints leave only plans 0001 and 0002 parallel.
 | 0004 | token provider, sync client, outcome types, and their tests             |
 | 0005 | Authenticator SPI classes, services, message bundle, and test           |
 | 0006 | test support classes and `LoginSyncIT`                                  |
-| 0007 | `podman-compose.yml`, `.env.example`, `Makefile`, and root `README.md`  |
+| 0007 | `compose.yml`, `.env.example`, `Makefile`, and root `README.md`         |
 
 `docs/plans/README.md` is shared guidance, not a component-plan output. Root `README.md` does not
 exist in the current skeleton; only plan 0007 creates it. Plan 0002 alone owns `.gitignore`.

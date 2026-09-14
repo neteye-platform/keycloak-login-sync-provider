@@ -15,8 +15,6 @@ set -euo pipefail
 MAVEN_IMAGE="maven:3.9-eclipse-temurin-21"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Rootless Podman puts its socket under the user's runtime directory.
-podman_socket="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock"
 # Test-only override for exercising no-socket behavior on hosts with Docker;
 # DOCKER_SOCKET_PATH is not an operator-facing setting.
 docker_socket="${DOCKER_SOCKET_PATH:-/var/run/docker.sock}"
@@ -35,8 +33,6 @@ resolve_container_socket() {
     # Integration tests need the host's socket to start Keycloak.
     if [ -n "${DOCKER_HOST:-}" ] && [ -S "${DOCKER_HOST#unix://}" ]; then
         printf '%s\n' "${DOCKER_HOST#unix://}"
-    elif [ -S "$podman_socket" ]; then
-        printf '%s\n' "$podman_socket"
     elif [ -S "$docker_socket" ]; then
         printf '%s\n' "$docker_socket"
     else
@@ -46,8 +42,7 @@ resolve_container_socket() {
 
 require_container_socket() {
     if ! socket="$(resolve_container_socket)"; then
-        echo "No container socket found; start one, or set DOCKER_HOST." >&2
-        echo "For rootless Podman: systemctl --user start podman.socket" >&2
+        echo "No container socket found; start Docker, or set DOCKER_HOST." >&2
         exit 1
     fi
 }
@@ -63,40 +58,31 @@ if goals_need_container_socket "${goals[@]}"; then
 fi
 
 if command -v mvn >/dev/null 2>&1; then
-    if [ -n "$socket" ] && [ "$socket" = "$podman_socket" ]; then
-        export DOCKER_HOST="unix://$socket"
-        export TESTCONTAINERS_RYUK_DISABLED=true
-    fi
     mvn -B "${goals[@]}"
     exit $?
 fi
 
 echo "No local Maven; running in $MAVEN_IMAGE instead." >&2
 
-runtime=""
-for candidate in docker podman; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-        runtime="$candidate"
-        break
-    fi
-done
-if [ -z "$runtime" ]; then
-    echo "Need either Maven on PATH or a container runtime (docker/podman)." >&2
+if ! command -v docker >/dev/null 2>&1; then
+    echo "Need either Maven on PATH or Docker." >&2
     exit 1
 fi
 
-extra_env=()
 mount_args=()
 if [ -n "$socket" ]; then
-    if [ "$socket" = "$podman_socket" ]; then
-        # Testcontainers' resource reaper cannot attach to a rootless daemon.
-        extra_env+=(-e TESTCONTAINERS_RYUK_DISABLED=true)
-    fi
     # Testcontainers needs the host socket to start Keycloak.
     mount_args+=(
         --volume "$socket:/var/run/docker.sock"
         --env DOCKER_HOST=unix:///var/run/docker.sock
     )
+fi
+
+# Testcontainers' resource reaper cannot attach to some daemons (e.g. rootless
+# ones); forward the operator's choice instead of deciding it here.
+extra_env=()
+if [ -n "${TESTCONTAINERS_RYUK_DISABLED:-}" ]; then
+    extra_env+=(--env "TESTCONTAINERS_RYUK_DISABLED=$TESTCONTAINERS_RYUK_DISABLED")
 fi
 
 # Survives between runs, so only the first one pays for the dependencies.
@@ -107,7 +93,7 @@ mkdir -p "$maven_cache"
 # unreadable from inside the container. :Z relabels the bind mounts.
 # --network=host: Testcontainers exposes the in-JVM mock identity provider to
 # the Keycloak container through the host's network.
-"$runtime" run --rm --network=host --security-opt label=disable \
+docker run --rm --network=host --security-opt label=disable \
     --volume "$repo_root:/workspace:Z" \
     --workdir /workspace \
     --volume "$maven_cache:/root/.m2:Z" \
