@@ -1,11 +1,9 @@
 name: Release
 
 on:
-  # push:
-  #   branches:
-  #     - "main"
-  #   paths:
-  #     - "pom.xml"
+  push:
+    branches:
+      - "main"
   workflow_dispatch:
 
 concurrency:
@@ -21,8 +19,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
 
       - name: Set up Java
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
@@ -31,35 +27,45 @@ jobs:
           distribution: temurin
           cache: maven
 
-      - name: Resolve release version
-        id: release
+      - name: Check whether the pom version has a GitHub Release
+        id: version
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
-          set -euo pipefail
-          pom_version="$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)"
+          pom_version="$(mvn -q -B help:evaluate \
+            -Dexpression=project.version -DforceStdout)"
           tag="v${pom_version}"
-          release_exists=false
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            release_exists=true
-          fi
-
-          {
-            printf 'pom_version=%s\n' "$pom_version"
-            printf 'tag=%s\n' "$tag"
-            printf 'release_exists=%s\n' "$release_exists"
-          } >>"$GITHUB_OUTPUT"
+          echo "pom_version=$pom_version" >>"$GITHUB_OUTPUT"
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+          status="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/releases/tags/$tag")"
+          case "$status" in
+            200)
+              echo "release_exists=true" >>"$GITHUB_OUTPUT"
+              echo "::notice::GitHub Release $tag already exists; nothing to release."
+              ;;
+            404)
+              echo "release_exists=false" >>"$GITHUB_OUTPUT"
+              echo "::notice::Releasing $tag."
+              ;;
+            *)
+              echo "::error::Unexpected GitHub API status $status while checking release $tag."
+              exit 1
+              ;;
+          esac
 
       - name: Build
-        if: steps.release.outputs.release_exists == 'false'
+        if: steps.version.outputs.release_exists == 'false'
         env:
-          POM_VERSION: ${{ steps.release.outputs.pom_version }}
+          POM_VERSION: ${{ steps.version.outputs.pom_version }}
         run: |
           mvn -B clean package
           test -f "target/keycloak-login-sync-provider-${POM_VERSION}.jar"
 
       - name: Generate GitHub App token
-        if: steps.release.outputs.release_exists == 'false'
+        if: steps.version.outputs.release_exists == 'false'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: generate-token
         with:
@@ -68,25 +74,54 @@ jobs:
           permission-contents: write
 
       - name: Tag the release
-        if: steps.release.outputs.release_exists == 'false'
+        if: steps.version.outputs.release_exists == 'false'
         env:
-          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
-          TAG: ${{ steps.release.outputs.tag }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          REPO: ${{ github.repository }}
         run: |
-          set -euo pipefail
-          if git ls-remote --exit-code --refs origin "refs/tags/${TAG}" >/dev/null 2>&1; then
-            exit 0
-          fi
-          git -c "http.https://github.com/.extraheader=" push \
-            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            "HEAD:refs/tags/${TAG}"
+          status="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/git/ref/tags/$TAG")"
+          case "$status" in
+            200)
+              # Retain only a tag that actually points at the checked-out
+              # HEAD; otherwise the JAR built now would be published under a
+              # tag describing different code.
+              ref_json="$(curl -sS -f \
+                -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$REPO/git/ref/tags/$TAG")"
+              object_sha="$(printf '%s' "$ref_json" | jq -r '.object.sha')"
+              object_type="$(printf '%s' "$ref_json" | jq -r '.object.type')"
+              if [ "$object_type" = "tag" ]; then
+                # Annotated tag: dereference the tag object to its commit.
+                object_sha="$(curl -sS -f \
+                  -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                  "https://api.github.com/repos/$REPO/git/tags/$object_sha" | jq -r '.object.sha')"
+              fi
+              if [ "$object_sha" != "$(git rev-parse HEAD)" ]; then
+                echo "::error::Existing tag $TAG points to $object_sha, not built HEAD $(git rev-parse HEAD); refusing to publish under a mismatched tag."
+                exit 1
+              fi
+              echo "::notice::Tag $TAG already exists and points to HEAD; retaining it."
+              ;;
+            404)
+              gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+                -f ref="refs/tags/$TAG" \
+                -f sha="$(git rev-parse HEAD)"
+              ;;
+            *)
+              echo "::error::Unexpected GitHub API status $status while checking tag $TAG."
+              exit 1
+              ;;
+          esac
 
       - name: Create GitHub release
-        if: steps.release.outputs.release_exists == 'false'
+        if: steps.version.outputs.release_exists == 'false'
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           token: ${{ steps.generate-token.outputs.token }}
-          tag_name: ${{ steps.release.outputs.tag }}
-          name: ${{ steps.release.outputs.tag }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
           generate_release_notes: true
-          files: target/keycloak-login-sync-provider-*.jar
+          files: target/keycloak-login-sync-provider-${{ steps.version.outputs.pom_version }}.jar

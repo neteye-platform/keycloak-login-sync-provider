@@ -6,104 +6,201 @@ repository builds. Nothing here is receiver-side code, and no receiver behaviour
 by this project.
 
 Authority: `LLD.pdf` sections 3.3, 3.4, 4.4 and 5, plus decision R5 in
-[plans/0001-contract-reconciliation.md](plans/0001-contract-reconciliation.md).
+[plans/0001-contract-reconciliation.md](plans/0001-contract-reconciliation.md). Where PermissionSync
+has a governing ADR, that ADR is the authoritative receiver-side contract and this document
+mirrors it:
+[0001-inbound-synchronization-contract](https://github.com/neteye-platform/permissionsync/blob/main/docs/adr/0001-inbound-synchronization-contract.md),
+[0002-receiver-side-jwt-verification](https://github.com/neteye-platform/permissionsync/blob/main/docs/adr/0002-receiver-side-jwt-verification.md),
+[0003-at-most-once-delivery-and-idempotent-reconciliation](https://github.com/neteye-platform/permissionsync/blob/main/docs/adr/0003-at-most-once-delivery-and-idempotent-reconciliation.md).
 
 ## Request
 
 The plugin performs a single HTTP call per logical sync:
 
 ```text
-POST {service-endpoint}/api/sync-user
+POST {service-endpoint}
 Authorization: Bearer <service-account-jwt>
 Content-Type: application/json
 ```
 
-`{service-endpoint}` is the configured base URL. The config property is `service-endpoint`
-(env `KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SERVICE_ENDPOINT`). LLD 4.3.1 spells the same property
-`endpoint`; that difference is flagged for alignment by the LLD owner, not adopted here.
+`{service-endpoint}` is the configured complete receiver URL, including its path (for example
+`http://receiver:8081/api/sync-user`). The config property is `service-endpoint` (env
+`KC_SPI_AUTHENTICATOR__LOGIN_SYNC__SERVICE_ENDPOINT`). LLD 4.3.1 spells the same property
+`endpoint`; that difference is flagged for alignment by the LLD owner, not adopted here. The
+provider posts to this URL verbatim, consistently with the complete `sa-token-endpoint` URL.
+
+Plain-HTTP `http://` endpoints are accepted only when the development-only `allow-insecure-http`
+opt-in (`KC_SPI_AUTHENTICATOR__LOGIN_SYNC__ALLOW_INSECURE_HTTP=true`) is set. In production both
+credential-bearing endpoints must use HTTPS; see the configuration section of the README.
+
+Upgrading from an earlier version is a breaking configuration change: an existing base-only URL
+must be updated to include the receiver path, or the provider will post to that base URL instead.
 
 The bearer token authenticates the **technical caller**. It is a service-account JWT obtained
 through OAuth2 Client Credentials. It is deliberately **not the logging-in user's** token, and
 the plugin never constructs, forges or re-signs a token of any kind. It only forwards a token
 issued to it.
 
+## Scope
+
+The plugin does not accept whatever scopes the service-account client happens to carry. When a
+target exists in the login realm, it asks for one explicitly. The target is the `clientId` of the
+client the user is logging in to, and the token request to `sa-token-endpoint` carries
+`scope=permissionsync:<clientId>` as a URL-encoded form parameter in its
+`application/x-www-form-urlencoded` body, alongside `grant_type`, `client_id` and `client_secret`.
+The issued JWT carries that scope, and the receiver routes and authorizes on it. The body is
+untouched by this: it stays at exactly the three ADR-0001 fields, and the target never appears in
+it. (The case where no target exists is covered separately below under "Empty scope is a valid
+no-op target".)
+
+The service-account token cache is keyed by scope. One cached token per `permissionsync:<target>`,
+each with its own refresh, so tokens for two targets are never interchanged. A `401` or `403`
+invalidates only the scope that saw it.
+
+For each target an instance serves, the operator must assign the client scope
+`permissionsync:<clientId>` to the service-account client as **Optional**, never Default, and must
+also provision the PermissionSync audience. A Default scope is applied to every token
+unconditionally, so a service account serving two targets would emit two `permissionsync:*` scope
+tokens at once, which ADR-0002 answers with `403`. An Optional scope is included only when
+requested, which is what the plugin does. The reverse mistake is silent twice over: Keycloak drops
+a requested scope that is not assigned to the client without raising an error, leaving a token with
+zero `permissionsync:` scope tokens — and the revised ADR-0002 never answers zero tokens with
+`403`; after strict body validation it answers the targetless no-op `204`. (This occurs only when
+a target WAS requested but not provisioned. It differs in intent from the case covered below under
+"Empty scope is a valid no-op target", where no target existed and no scope was requested at all,
+but both complete with the same `204`.)
+
+### Empty scope is a valid no-op target
+
+Not every login client has a PermissionSync target. An empty scope, meaning the token request
+carries no `scope` form parameter at all and the issued JWT carries no `permissionsync:` scope
+token, is a valid request. PermissionSync now accepts it as a targetless no-op and answers
+`204`, always; ADR-0001 reserves `200` for selected-target reconciliation that changed target
+state. This reverses the earlier position, which read zero `permissionsync:` scope tokens
+as a failure in every case.
+
+Which scope the plugin asks for is resolved entirely inside the realm the user is authenticating
+against, in this order:
+
+1. The authenticator reads that login realm's client-scope catalog through
+   `RealmModel.getClientScopesStream()` and looks for a `ClientScopeModel` whose name is exactly
+   `permissionsync:<clientId>`, where `<clientId>` is the client the user is logging in to.
+2. If such a client scope exists, the plugin requests that exact scope string, and everything
+   above about Optional assignment and the audience applies unchanged.
+3. If it does not exist, the plugin requests no scope. The token request body omits `scope`
+   entirely, the issued JWT carries no `permissionsync:` scope token, and the receiver treats the
+   call as a targetless no-op.
+
+The check is a signal read from the login realm only. It says nothing about, and does not consult,
+the scopes actually assigned to the service-account client in its own (possibly different) realm.
+There is no cross-realm lookup and no Admin API call.
+
+That distinction matters only for intent, because the revised ADR-0001 and ADR-0002 give both of
+them the same outcome. Two different situations produce a token with zero `permissionsync:` scope
+tokens:
+
+- **No target at all.** No `permissionsync:<clientId>` client scope exists in the login realm, so
+  the plugin deliberately requested nothing. Accepted as the targetless no-op.
+- **A target that could not be produced.** The login realm does have the client scope, so the
+  plugin explicitly requested `permissionsync:<clientId>`, but the operator never assigned that
+  scope to the service-account client. Keycloak silently drops the requested scope, and the
+  receiver — seeing zero `permissionsync:` tokens and a valid body — answers the same targetless
+  `204` as the case above. This is still a genuine misconfiguration, but it now fails silently:
+  the login is permitted, the target is never reconciled, and the plugin cannot detect it because
+  the body carries no target and the `204` carries no body. ADR-0002 assigns that detection to
+  the receiver's targetless no-op telemetry (ADR-0006) and to operator provisioning review.
+
+Fail-closed semantics for genuine receiver failures are untouched by all of this. Only the scope
+value the plugin requests differs; a receiver failure (`400`, `401`, `403`, `5xx`, timeout, IO
+error) still blocks the login exactly as before. What no longer blocks is the dropped-scope case
+above, which the receiver now reports as a `204` success.
+
 ## Body
 
-The body carries exactly the six fields fixed by LLD section 4.4. No more, no fewer.
+The body carries exactly the three fields fixed by PermissionSync ADR-0001. No more, no fewer:
+that receiver rejects unknown fields with `400`, so `client_id`, `email` and `timestamp` (present
+in earlier LLD revisions) MUST NOT be serialized.
 
 | field        | type            | meaning                                            |
 | ------------ | --------------- | -------------------------------------------------- |
 | `event_type` | string          | always the constant `LOGIN`                        |
-| `client_id`  | string          | the OIDC client the user authenticated against     |
-| `username`   | string          | the Keycloak username                              |
-| `email`      | string or null  | the user's email, null when unset                  |
+| `username`   | string          | the canonical user key the receiver resolves       |
 | `groups`     | array of string | full group paths, for example `/staff/engineering` |
-| `timestamp`  | string          | ISO-8601 UTC, truncated to whole seconds           |
 
 Example:
 
 ```json
 {
   "event_type": "LOGIN",
-  "client_id": "internal-portal",
   "username": "jdoe",
-  "email": "jdoe@example.com",
-  "groups": ["/staff", "/staff/engineering"],
-  "timestamp": "2026-08-24T09:15:32Z"
+  "groups": ["/staff", "/staff/engineering"]
 }
 ```
 
 ## Responses
 
-| outcome           | plugin interpretation                       |
-| ----------------- | ------------------------------------------- |
-| `200 OK`          | success                                     |
-| `201 Created`     | success                                     |
-| `400 Bad Request` | single-attempt failure, no second POST      |
-| `401`             | single-attempt failure, no second POST      |
-| `403`             | single-attempt failure, no second POST      |
-| `500`             | single-attempt failure, no second POST      |
-| timeout           | single-attempt failure, no second POST      |
-| IO error          | single-attempt failure, no second POST      |
+| outcome           | plugin interpretation                            |
+| ----------------- | ------------------------------------------------ |
+| `200 OK`          | success: the target changed to the desired state |
+| `204 No Content`  | success: target unchanged, or targetless no-op   |
+| `400 Bad Request` | single-attempt failure, no second POST           |
+| `401`             | single-attempt failure, no second POST           |
+| `403`             | single-attempt failure, no second POST           |
+| `500`             | single-attempt failure, no second POST           |
+| timeout           | single-attempt failure, no second POST           |
+| IO error          | single-attempt failure, no second POST           |
+
+Per ADR-0001, `200` is returned only by selected-target reconciliation that changed target state.
+`204` covers two distinct successes — selected-target reconciliation that reported `unchanged`,
+and the targetless no-op where the token carried zero `permissionsync:` tokens — and the two are
+indistinguishable on the wire.
 
 Every non-success outcome is terminal for that login. There is exactly one HTTP attempt per
 logical sync, and an admitted failure blocks the login rather than permitting it.
 
 ## Receiver-side assumptions (NOT IMPLEMENTED here)
 
-These are the checks the receiver is **assumed** to perform. This repository implements none of
-them and provides no stub, scaffold or reference for them.
+These are the checks the receiver is **assumed** to perform. PermissionSync ADR-0002 fixes them;
+this repository implements none of them and provides no stub, scaffold or reference for them.
 
 - Verify the token signature against Keycloak's cached `JWKS` public keys.
-- Check `exp` so expired tokens are rejected.
+- Check `exp` (and `iat`) so expired tokens are rejected.
 - Check the expected `iss` matches the trusted Keycloak realm issuer.
-- Check the expected `aud`, if an audience is configured for the integration.
-- Accept only an explicitly allowed signing algorithm.
-- Require a `least-privilege` technical role or scope, so the caller can do this and nothing else.
+- Check `aud` contains the configured PermissionSync audience.
+- Check the `client_id` claim, emitted by the service-account client-id mapper.
+- Require the `scope` claim to contain **exactly one** exact token with the
+  `permissionsync:<target>` prefix; the suffix is the logical target the caller may touch. (When a
+  target was requested, this is the expected token count; see "Empty scope is a valid no-op target"
+  above for the receiver's separate no-op path, where zero such tokens are expected and accepted.)
 
 If the receiver skips these, the plugin cannot compensate. The plugin sends the token; it never
 validates it on the receiver's behalf.
 
 ## Open integration decisions
 
-- The exact technical role name is `NOT decided` and must be finalized before a real deployment.
-- The exact claim carrying that role is `NOT decided` and must be finalized before a real
-  deployment.
-- The audience value is `NOT decided` and must be finalized before a real deployment.
-- LLD Open point 3, ownership of the receiver, is still open. Until an owner exists, no counterpart
-  can agree to a contract revision.
-- The path `/api/sync-user` is provisional. It is isolated in the single constant
-  `LoginSyncConstants.SYNC_USER_PATH` so a later change touches one line. That provisional path,
-  together with the undecided items above, is why the project stays at `0.x`.
+What was previously open is now decided by PermissionSync:
+
+- **Authorization** is decided by ADR-0002: when a target was requested, the token must carry
+  exactly one `permissionsync:<target>` scope token, the PermissionSync audience, and `client_id`.
+  (When no target scope exists in the login realm, the plugin requests none, and zero
+  `permissionsync:` scope tokens is the expected, accepted no-op case described above.)
+  Provisioning that scope/audience on the service-account client is an operator task, not provider
+  code; the plugin deliberately does not hardcode a target because it varies per deployment. It
+  requests the target derived from the login client instead, which is a safe identifier only inside
+  one trust domain: two realms can each hold a client of the same name, and it is the provider's
+  restriction to its own realm that keeps the name unambiguous.
+- **Ownership**: PermissionSync (the receiver) is the contract owner. `/api/sync-user` is its
+  documented path and the reference value used here; an operator may still configure any path
+  through the complete `service-endpoint` URL.
 
 ## Delivery semantics (decision R5)
 
-The payload carries **no event id, no request id, no correlation id and no idempotency key**, and
-`timestamp` is truncated to whole seconds. The consequences are concrete and are stated here so
-nobody discovers them in production:
+The payload carries **no event id, no request id, no correlation id, no idempotency key and no
+timestamp**. PermissionSync ADR-0003 mirrors this: single-attempt, at-most-once, no retry, no
+deduplication on the receiver. The consequences are concrete and are stated here so nobody
+discovers them in production:
 
-- Two genuine logins by the same user to the same client within one second produce
-  **byte-identical** bodies.
+- Two genuine logins by the same user with identical groups produce **byte-identical** bodies.
 - The receiver **cannot** distinguish a duplicate delivery from two real logins, and therefore
   **must not** deduplicate on payload equality. Doing so would silently discard real login events.
 - Delivery is **at-most-once**. A failed or skipped sync is never replayed, so the receiver may
@@ -114,6 +211,6 @@ nobody discovers them in production:
 Two rules follow from this:
 
 1. The payload MUST NOT be extended without a contract revision agreed with the receiver owner.
-   The six fields are fixed by the LLD.
+   The three fields are fixed by PermissionSync ADR-0001.
 2. If correlation later becomes necessary, the agreed mechanism should be a **transport header**
-   rather than a body field, so the LLD-fixed body stays intact.
+   rather than a body field, so the ADR-fixed body stays intact.
