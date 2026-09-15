@@ -20,7 +20,7 @@ services:
       - ./target:/opt/keycloak/providers:z
 
   mock-syncservice:
-    image: docker.io/library/eclipse-temurin:21-jre@sha256:a80c51f2d09a3e7e00d521f1c817bbceb6b3be94109b4a784d46078099882dda
+    image: docker.io/library/eclipse-temurin:26-jre@sha256:6272dd10034adf1177526d8c7c095f7190a170adc66b550006b1b40b17119963
     command:
       - java
       - -cp
