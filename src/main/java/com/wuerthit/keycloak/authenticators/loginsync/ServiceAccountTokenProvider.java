@@ -217,7 +217,7 @@ public class ServiceAccountTokenProvider implements AutoCloseable {
                         + encode(config.saClientId())
                         + "&client_secret="
                         + encode(config.saClientSecret());
-        return scope.equals("") ? body : body + "&scope=" + encode(scope);
+        return scope.isEmpty() ? body : body + "&scope=" + encode(scope);
     }
 
     private ScopeSlot slotFor(String scope) {
