@@ -1,6 +1,6 @@
 # Keycloak Login Sync Provider
 
-This project provides the Keycloak 26.7.0 `login-sync` custom Authenticator.
+This project provides the Keycloak `login-sync` custom Authenticator.
 On a browser LOGIN, it performs one synchronous POST to an external
 syncservice, authenticated with a service-account JWT obtained through OAuth2
 Client Credentials. See [the sync contract](docs/SYNC-CONTRACT.md) and
@@ -12,8 +12,8 @@ Copy `.env.example` to the git-ignored `.env` before starting the local stack.
 The stack is defined in `compose.yml`; the Makefile drives it through
 `docker compose`.
 
-Use `scripts/test.sh` as the only supported Maven entry point. It supplies
-Java 21 through a container when Maven is unavailable locally. Run the full
+Use `scripts/test.sh` as the only supported Maven entry point. It supplies a
+JDK through a container when Maven is unavailable locally. Run the full
 verification suite with:
 
 ```sh
