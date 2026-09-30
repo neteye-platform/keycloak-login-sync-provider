@@ -12,13 +12,14 @@ stack (`compose.yml`, `Makefile`, `.env.example`) and a root
 ## Build And Test
 
 - Run Maven only through `scripts/test.sh`; it uses local Maven when
-  available and otherwise a Java 21 Maven container.
+  available and otherwise a Maven container.
 - `scripts/test.sh clean verify` is the full unit and integration-test gate.
 - Integration goals (`verify`, `integration-test`, `failsafe:integration-test`)
   require a reachable container socket on both the local-Maven and
   containerised paths; without one the script prints guidance and exits 1.
-- Java 21 is required. Spotless AOSP runs during Maven `validate`; Surefire runs
-  `*Test` and Failsafe runs `*IT` during `verify`.
+- The pom's `java.version` sets the required JDK. Spotless AOSP runs during
+  Maven `validate`; Surefire runs `*Test` and Failsafe runs `*IT` during
+  `verify`.
 
 ## Releases
 
