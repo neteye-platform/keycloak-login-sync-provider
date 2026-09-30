@@ -18,10 +18,10 @@ import org.keycloak.sessions.AuthenticationSessionModel;
  * Per-request login synchronization, executed as a REQUIRED execution after the forms subflow.
  *
  * <p><strong>Every deliberate skip calls {@link AuthenticationFlowContext#success()}</strong>,
- * never the ATTEMPTED execution status. Verified from Keycloak 26.7.0 source: {@code
- * AuthenticationProcessor.isSuccessful()} (lines 780-784) returns true only for {@code
- * ExecutionStatus.SUCCESS}; {@code DefaultAuthenticationFlow} line 295 gates REQUIRED executions on
- * it and breaks the loop otherwise; {@code authenticateOnly()} line 1132 then throws {@code
+ * never the ATTEMPTED execution status. Verified from Keycloak source: {@code
+ * AuthenticationProcessor.isSuccessful()} returns true only for {@code ExecutionStatus.SUCCESS};
+ * {@code DefaultAuthenticationFlow} gates REQUIRED executions on it and breaks the loop otherwise;
+ * {@code AuthenticationProcessor.authenticateOnly()} then throws {@code
  * AuthenticationFlowException}. Marking this execution ATTEMPTED would therefore fail the execution
  * and break every login in the realm. This is decision A0 and {@code R-10}.
  *
