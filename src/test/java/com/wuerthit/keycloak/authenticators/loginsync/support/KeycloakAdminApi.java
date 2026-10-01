@@ -147,12 +147,12 @@ public class KeycloakAdminApi {
     }
 
     public void addAudienceMapper(
-            String realm, String clientId, String mapperName, String includedClientAudience)
+            String realm, String clientId, String mapperName, String includedCustomAudience)
             throws IOException, InterruptedException {
         String clientUuid = requireClientUuid(realm, clientId);
         Map<String, String> config =
                 Map.of(
-                        "included.client.audience", includedClientAudience,
+                        "included.custom.audience", includedCustomAudience,
                         "access.token.claim", "true",
                         "id.token.claim", "false",
                         "introspection.token.claim", "true");
