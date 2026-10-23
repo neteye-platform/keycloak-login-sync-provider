@@ -1,7 +1,7 @@
 # This stack carries CONFIGURATION ONLY and MUST NOT provision realms, clients or roles.
 services:
   keycloak:
-    image: quay.io/keycloak/keycloak:26.8.1@sha256:79c623a22abacf3fe6c00a5fb30f5b7843d717b234033b80995891c06116d244
+    image: quay.io/keycloak/keycloak:26.8.1@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b
     command: start-dev
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
@@ -20,7 +20,7 @@ services:
       - ./target:/opt/keycloak/providers:z
 
   mock-syncservice:
-    image: docker.io/library/eclipse-temurin:27-jre@sha256:387922dd341a11a06f39375e6b13f3cb865e09aa409789cd4f7a5a6577cd2290
+    image: docker.io/library/eclipse-temurin:27-jre@sha256:d6bfa738df69e8dec9061b3e26f2ae564d92ad169faa36086dcfa33f0a901d35
     command:
       - java
       - -cp
